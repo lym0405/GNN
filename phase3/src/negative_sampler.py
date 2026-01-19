@@ -66,10 +66,18 @@ class Phase3NegativeSampler:
         historical_set = set()
         
         # 과거 네트워크 파일들 (2020-2023)
-        network_files = [
-            self.data_dir / "raw" / f"posco_network_{year}.csv"
-            for year in [2020, 2021, 2022, 2023]
-        ]
+        # 실제 파일명: posco_network_capital_consumergoods_removed_{year}.csv
+        network_files = []
+        for year in [2020, 2021, 2022, 2023]:
+            # 1순위: 긴 파일명
+            long_name = self.data_dir / "raw" / f"posco_network_capital_consumergoods_removed_{year}.csv"
+            if long_name.exists():
+                network_files.append(long_name)
+            else:
+                # 2순위: 짧은 파일명
+                short_name = self.data_dir / "raw" / f"posco_network_{year}.csv"
+                if short_name.exists():
+                    network_files.append(short_name)
         
         # firm_to_idx 로드
         firm_to_idx_path = self.data_dir / "raw" / "firm_to_idx_model2.csv"

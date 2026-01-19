@@ -130,7 +130,12 @@ class TemporalGraphBuilder:
         -------
         events : List of (timestamp, src, dst, edge_feat)
         """
-        network_path = self.raw_dir / f"posco_network_{year}.csv"
+        # 실제 파일명: posco_network_capital_consumergoods_removed_{year}.csv
+        network_path = self.raw_dir / f"posco_network_capital_consumergoods_removed_{year}.csv"
+        
+        # 폴백: 짧은 파일명도 시도
+        if not network_path.exists():
+            network_path = self.raw_dir / f"posco_network_{year}.csv"
         
         if not network_path.exists():
             logger.warning(f"⚠️  {year}년 네트워크 파일 없음")
@@ -143,15 +148,18 @@ class TemporalGraphBuilder:
             df = df.drop(columns=['Unnamed: 0'])
         
         # source/target 컬럼명 확인
-        # structure 문서에 따르면: 사업자등록번호, 거래처사업자등록번호
+        # structure 문서 기준: 사업자등록번호, 거래처사업자등록번호
         source_col = None
         target_col = None
+        amount_col = None
         
-        # 1순위: 정확한 컬럼명
+        # 1순위: 정확한 컬럼명 (실제 데이터)
         if '사업자등록번호' in df.columns:
             source_col = '사업자등록번호'
         if '거래처사업자등록번호' in df.columns:
             target_col = '거래처사업자등록번호'
+        if '총공급금액' in df.columns:
+            amount_col = '총공급금액'
         
         # 2순위: 부분 매칭
         if source_col is None:
@@ -166,6 +174,12 @@ class TemporalGraphBuilder:
                     target_col = col
                     break
         
+        if amount_col is None:
+            for col in df.columns:
+                if '공급금액' in col or '거래액' in col or '금액' in col:
+                    amount_col = col
+                    break
+        
         # 3순위: 영문 컬럼명 (더미 데이터용)
         if source_col is None or target_col is None:
             for col in df.columns:
@@ -174,13 +188,17 @@ class TemporalGraphBuilder:
                     source_col = col
                 if target_col is None and ('target' in col_lower or 'to' in col_lower or 'dest' in col_lower):
                     target_col = col
+                if amount_col is None and ('amount' in col_lower or 'weight' in col_lower):
+                    amount_col = col
         
-        # 컬럼이 없으면 첫 두 컬럼을 source/target으로 사용
+        # 컬럼이 없으면 첫 컬럼들을 사용
         if source_col is None or target_col is None:
             if len(df.columns) >= 2:
                 source_col = df.columns[0]
                 target_col = df.columns[1]
-                logger.info(f"  📋 {year}년 네트워크: '{source_col}' -> '{target_col}'")
+                if amount_col is None and len(df.columns) >= 3:
+                    amount_col = df.columns[2]
+                logger.info(f"  📋 {year}년 네트워크: '{source_col}' -> '{target_col}' (금액: '{amount_col}')")
             else:
                 logger.error(f"❌ {year}년 네트워크 컬럼 부족")
                 return []
@@ -200,7 +218,7 @@ class TemporalGraphBuilder:
             dst_idx = self.firm_to_idx[dst_firm]
             
             # 엣지 피처 (거래액, 빈도 등)
-            edge_feat = self._extract_edge_features(row)
+            edge_feat = self._extract_edge_features(row, amount_col)
             
             # 타임스탬프 (연도 내 순서)
             if 'timestamp' in df.columns:
@@ -215,9 +233,16 @@ class TemporalGraphBuilder:
         
         return events
     
-    def _extract_edge_features(self, row: pd.Series) -> np.ndarray:
+    def _extract_edge_features(self, row: pd.Series, amount_col: str = None) -> np.ndarray:
         """
         엣지 피처 추출
+        
+        Parameters
+        ----------
+        row : pd.Series
+            데이터프레임의 한 행
+        amount_col : str
+            거래액 컬럼명
         
         Returns
         -------
@@ -225,8 +250,11 @@ class TemporalGraphBuilder:
         """
         features = []
         
-        # 거래액 (정규화)
-        if 'transaction_amount' in row:
+        # 거래액 (정규화) - structure 문서 기준: 총공급금액
+        if amount_col and amount_col in row:
+            amount = row[amount_col]
+            features.append(np.log1p(float(amount)) if pd.notna(amount) else 0.0)
+        elif 'transaction_amount' in row:
             amount = row['transaction_amount']
             features.append(np.log1p(amount))
         else:
