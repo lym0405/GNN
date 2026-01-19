@@ -133,124 +133,6 @@ def load_data(config: Config):
     }
 
 
-def build_sector_mapping(firm_info: pd.DataFrame, firm_ids: list):
-    """
-    기업 → 산업 매핑 생성
-    
-    structure 문서 기준:
-    - IO상품_단일_대분류_코드: Phase 1 레시피 추정용 (33개 대분류)
-    
-    Returns
-    -------
-    biz_sector_map : dict
-        {사업자등록번호: 산업인덱스(0~32)}
-    """
-    logger.info("🔧 기업-산업 매핑 생성 중...")
-    
-    biz_sector_map = {}
-    
-    # 사업자등록번호를 키로 매핑
-    firm_info['사업자등록번호'] = firm_info['사업자등록번호'].astype(str)
-    
-    # IO 테이블의 산업 코드 목록 (A_33.csv의 index)
-    # 실제 형식: "A", "B", "C01", "C02", ..., "T" (문자열)
-    io_sector_list = ['A', 'B', 'C01', 'C02', 'C03', 'C04', 'C05', 'C06', 'C07', 'C08', 'C09', 
-                      'C10', 'C11', 'C12', 'C13', 'C14', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 
-                      'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T']
-    io_sector_to_idx = {sec: i for i, sec in enumerate(io_sector_list)}
-    
-    for _, row in firm_info.iterrows():
-        biz_no = row['사업자등록번호']
-        
-        # IO 상품 코드 추출 (컬럼명 우선순위)
-        sector_code = None
-        
-        # 1순위: IO상품_단일_대분류_코드 (실제 데이터)
-        if 'IO상품_단일_대분류_코드' in row and pd.notna(row['IO상품_단일_대분류_코드']):
-            sector_code = str(row['IO상품_단일_대분류_코드']).strip()
-        else:
-            # 2순위: 더미 데이터용 컬럼명
-            for col in ['산업코드', 'sector_code', 'industry_code', 'io_sector']:
-                if col in row and pd.notna(row[col]):
-                    sector_code = str(row[col]).strip()
-                    break
-        
-        # IO 코드를 인덱스로 변환 (문자열 매칭)
-        if sector_code and sector_code in io_sector_to_idx:
-            biz_sector_map[biz_no] = io_sector_to_idx[sector_code]
-    
-    logger.info(f"   ✓ 매핑 완료: {len(biz_sector_map)} 기업")
-    
-    # 매핑되지 않은 기업 처리 (기본값: -1)
-    for firm_id in firm_ids:
-        if firm_id not in biz_sector_map:
-            biz_sector_map[firm_id] = -1  # Unknown
-    
-    logger.info(f"   ✓ 전체 기업: {len(firm_ids)}")
-    logger.info(f"   ✓ 매핑 실패: {sum(1 for v in biz_sector_map.values() if v == -1)}")
-    
-    return biz_sector_map
-
-
-def build_revenue_share(revenue: pd.DataFrame, biz_sector_map: dict):
-    """
-    산업별 매출 점유율 계산
-    
-    structure 문서 기준:
-    - final_tg_2024_estimation.csv: tg_2024_final (최종 매출액)
-    
-    Returns
-    -------
-    biz_share_map : dict
-        {사업자등록번호: 산업 내 점유율(0~1)}
-    """
-    logger.info("💰 산업별 매출 점유율 계산 중...")
-    
-    # 업체번호 정규화
-    revenue['업체번호'] = revenue['업체번호'].astype(str)
-    
-    # 매출 컬럼 찾기 (우선순위 기반)
-    revenue_col = None
-    
-    # 1순위: tg_2024_final (structure 문서 기준)
-    if 'tg_2024_final' in revenue.columns:
-        revenue_col = 'tg_2024_final'
-    else:
-        # 2순위: 기타 매출 관련 컬럼
-        for col in ['tg_2024', 'revenue', 'sales', 'total_sales', '매출액']:
-            if col in revenue.columns:
-                revenue_col = col
-                logger.info(f"   📋 매출 컬럼: '{revenue_col}' 사용 (tg_2024_final 없음)")
-                break
-    
-    if not revenue_col:
-        logger.warning("   ⚠️ 매출 컬럼을 찾을 수 없습니다. 점유율 계산 생략.")
-        logger.warning(f"   사용 가능한 컬럼: {list(revenue.columns[:10])}")
-        return {}
-    
-    # 산업별 매출 집계
-    sector_revenues = {}
-    for _, row in revenue.iterrows():
-        firm_id = row['업체번호']
-        rev = float(row[revenue_col]) if pd.notna(row[revenue_col]) else 0
-        
-        if firm_id in biz_sector_map and rev > 0:
-            sector = biz_sector_map[firm_id]
-            if sector >= 0:
-                sector_revenues.setdefault(sector, []).append((firm_id, rev))
-    
-    # 점유율 계산
-    biz_share_map = {}
-    for sector, firms in sector_revenues.items():
-        total_revenue = sum(r for _, r in firms)
-        for firm_id, rev in firms:
-            biz_share_map[firm_id] = rev / total_revenue
-    
-    logger.info(f"   ✓ 점유율 계산 완료: {len(biz_share_map)} 기업")
-    
-    return biz_share_map
-
-
 def generate_B_matrix(config: Config, data: dict):
     """B 행렬 생성"""
     logger.info("=" * 70)
@@ -270,6 +152,7 @@ def generate_B_matrix(config: Config, data: dict):
     # get_vector 메서드를 사용하여 각 기업의 레시피 생성
     logger.info("   - 기업별 레시피 생성 중...")
     B_matrix = []
+    none_count = 0
     for firm_id in data['firm_ids']:
         recipe = generator.get_vector(firm_id)
         if recipe is not None:
@@ -277,12 +160,17 @@ def generate_B_matrix(config: Config, data: dict):
         else:
             # 매핑 실패 시 제로 벡터
             B_matrix.append(np.zeros(33))
+            none_count += 1
     
     B_matrix = np.array(B_matrix)
     
+    logger.info(f"   ✓ B 행렬 생성 완료: {B_matrix.shape}")
+    logger.info(f"   ✓ 매핑 성공: {len(data['firm_ids']) - none_count}/{len(data['firm_ids'])} 기업")
+    
     # 저장
     config.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    generator.save_B_matrix(B_matrix, str(config.B_MATRIX_OUTPUT))
+    np.save(str(config.B_MATRIX_OUTPUT), B_matrix)
+    logger.info(f"   ✓ 저장: {config.B_MATRIX_OUTPUT}")
     
     logger.info("=" * 70)
     
