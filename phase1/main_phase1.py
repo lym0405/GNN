@@ -166,46 +166,32 @@ def build_sector_mapping(firm_info: pd.DataFrame, firm_ids: list):
     # 사업자등록번호를 키로 매핑
     firm_info['사업자등록번호'] = firm_info['사업자등록번호'].astype(str)
     
+    # IO 테이블의 산업 코드 목록 (A_33.csv의 index)
+    # 실제 형식: "A", "B", "C01", "C02", ..., "T" (문자열)
+    io_sector_list = ['A', 'B', 'C01', 'C02', 'C03', 'C04', 'C05', 'C06', 'C07', 'C08', 'C09', 
+                      'C10', 'C11', 'C12', 'C13', 'C14', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 
+                      'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T']
+    io_sector_to_idx = {sec: i for i, sec in enumerate(io_sector_list)}
+    
     for _, row in firm_info.iterrows():
         biz_no = row['사업자등록번호']
         
         # IO 상품 코드 추출 (컬럼명 우선순위)
         sector_code = None
         
-        # 1순위: IO상품_단일_대분류_코드 (실제 데이터, structure 문서 기준)
+        # 1순위: IO상품_단일_대분류_코드 (실제 데이터)
         if 'IO상품_단일_대분류_코드' in row and pd.notna(row['IO상품_단일_대분류_코드']):
             sector_code = str(row['IO상품_단일_대분류_코드']).strip()
         else:
-            # 2순위: IO상품 관련 컬럼 (부분 매칭)
-            for col in firm_info.columns:
-                if 'IO상품' in col and '단일' in col and '대분류' in col and '코드' in col:
-                    if pd.notna(row[col]):
-                        sector_code = str(row[col]).strip()
-                        break
-            
-            # 3순위: 더미 데이터용 컬럼명
-            if sector_code is None:
-                for col in ['산업코드', 'sector_code', 'industry_code', 'io_sector']:
-                    if col in row and pd.notna(row[col]):
-                        sector_code = str(row[col])
-                        break
+            # 2순위: 더미 데이터용 컬럼명
+            for col in ['산업코드', 'sector_code', 'industry_code', 'io_sector']:
+                if col in row and pd.notna(row[col]):
+                    sector_code = str(row[col]).strip()
+                    break
         
-        if sector_code:
-            try:
-                # IO 상품 코드를 인덱스로 변환
-                # IO 코드는 1~33 범위이므로 0-based index로 변환
-                sector_idx = int(sector_code)
-                
-                # 1-based index라면 0-based로 변환
-                if 1 <= sector_idx <= 33:
-                    sector_idx = sector_idx - 1
-                
-                # 0-based index가 유효한지 확인
-                if 0 <= sector_idx < 33:
-                    biz_sector_map[biz_no] = sector_idx
-            except (ValueError, TypeError):
-                # 변환 실패 시 무시
-                pass
+        # IO 코드를 인덱스로 변환 (문자열 매칭)
+        if sector_code and sector_code in io_sector_to_idx:
+            biz_sector_map[biz_no] = io_sector_to_idx[sector_code]
     
     logger.info(f"   ✓ 매핑 완료: {len(biz_sector_map)} 기업")
     
