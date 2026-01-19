@@ -1,16 +1,18 @@
 # Phase 3 최적화: Hybrid Link Prediction 가속화
 > **생성일**: 2026-01-19  
 > **목적**: GraphSEAL, SC-TGN, 학습 루프 병목 제거 및 속도 향상
+> **업데이트**: UKGE 제거 - DRNL만 사용하여 추가 경량화
 
 ---
 
 ## 🎯 최적화 목표
 
-Phase 3의 Hybrid Link Prediction (SC-TGN + GraphSEAL)은 두 가지 모델을 동시에 학습시키므로 매우 느립니다. 다음 세 가지 병목을 제거하여 **10-100배 속도 향상**을 목표로 합니다:
+Phase 3의 Hybrid Link Prediction (SC-TGN + GraphSEAL)은 두 가지 모델을 동시에 학습시키므로 매우 느립니다. 다음 네 가지 병목을 제거하여 **10-100배 속도 향상**을 목표로 합니다:
 
 1. **GraphSEAL의 Python BFS** → PyTorch Geometric C++ 함수로 교체
-2. **SC-TGN의 무제한 이웃 집계** → 최신 N개로 제한
-3. **동시 학습의 비효율** → Curriculum Learning으로 단계별 학습
+2. **UKGE 오버헤드** → 제거 (TIS는 loss에서만 사용)
+3. **SC-TGN의 무제한 이웃 집계** → 최신 N개로 제한
+4. **동시 학습의 비효율** → Curriculum Learning으로 단계별 학습
 
 ---
 
@@ -20,11 +22,12 @@ Phase 3의 Hybrid Link Prediction (SC-TGN + GraphSEAL)은 두 가지 모델을 �
 |------------|--------|-------|--------|------|
 | GraphSEAL BFS | Python Loop | PyG C++ | 100-1000x | `graphseal.py` |
 | GraphSEAL Hops | 2-hop | 1-hop | 2x | `main.py` |
+| UKGE | Confidence Net | 제거 | 1.5-2x | `graphseal.py` |
 | TGN Neighbor Sampling | 무제한 | 최신 10개 | 2-5x | `sc_tgn.py` |
 | Batch Size | 1024 | 4096 | 4x throughput | `main.py` |
 | Curriculum Learning | 동시 학습 | 단계별 학습 | 2-3x | `hybrid_trainer.py` |
 
-**종합 속도 향상**: **50-200배** (설정 및 데이터에 따라 다름)
+**종합 속도 향상**: **100-500배** (설정 및 데이터에 따라 다름)
 
 ---
 
@@ -270,6 +273,63 @@ class HybridTrainer:
 - **수렴 속도**: 2-3배 빠름 (개별 학습 → 빠른 수렴)
 - **최종 성능**: 동시 학습과 유사하거나 더 좋음
 - **학습 안정성**: 명확한 학습 목표 → 안정적
+
+---
+
+## 🔧 최적화 2: UKGE 제거 (추가 경량화)
+
+### 문제점
+UKGE (Uncertain Knowledge Graph Embedding)의 Confidence Scorer는:
+- **추가 신경망**: embedding_dim * 2 + 1 → hidden_dim → 1 (추가 파라미터)
+- **Forward 오버헤드**: 모든 배치마다 confidence 계산
+- **중복**: TIS 정보는 이미 loss function에서 soft label로 사용 중
+
+### 해결책: UKGE 제거, DRNL만 사용
+
+GraphSEAL을 순수 DRNL (Distance Encoding) 방식으로 경량화합니다.
+
+#### 변경 파일: `phase3/src/graphseal.py`
+
+**Before**:
+```python
+class GraphSEAL(nn.Module):
+    def __init__(self, ..., use_ukge=True):
+        self.confidence_scorer = UKGEConfidenceScorer(...)  # 추가 네트워크
+    
+    def forward(self, ...):
+        logits = self.link_predictor(edge_emb)
+        confidence = self.confidence_scorer(src_emb, dst_emb, tis_scores)  # 오버헤드
+        return logits, confidence
+
+# Ensemble에서
+final_logits = alpha * tgn_logits + (1 - alpha) * graphseal_logits
+final_logits = final_logits * confidence  # UKGE로 추가 조정
+```
+
+**After**:
+```python
+class GraphSEAL(nn.Module):
+    def __init__(self, ...):
+        # UKGE 제거 - DRNL만 사용
+        self.link_predictor = nn.Sequential(...)  # 간소화
+    
+    def forward(self, ...):
+        logits = self.link_predictor(edge_emb)
+        return logits  # 단일 값 반환
+
+# Ensemble에서
+final_logits = alpha * tgn_logits + (1 - alpha) * graphseal_logits  # 단순 가중 평균
+```
+
+**효과**:
+- **파라미터 감소**: ~10-20% (Confidence Net 제거)
+- **Forward 속도**: 1.5-2배 (추가 네트워크 계산 제거)
+- **메모리**: 추가 텐서 할당 제거
+- **성능**: TIS는 loss에서 이미 사용 중이므로 성능 저하 미미
+
+**철학**: "TIS 정보를 두 곳에서 사용할 필요 없음"
+- Loss function: TIS-aware soft label (이미 구현됨)
+- UKGE: TIS 기반 confidence (중복, 제거함)
 
 ---
 

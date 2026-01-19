@@ -65,7 +65,6 @@ class Config:
     # Track B (GraphSEAL) 하이퍼파라미터
     GRAPHSEAL_HIDDEN_DIM = 128
     GRAPHSEAL_NUM_HOPS = 1  # [최적화] 2 -> 1 (속도 2배, 성능 저하 미미)
-    USE_UKGE = True
     
     # Ensemble
     ENSEMBLE_ALPHA = 0.5  # Track A 가중치 (초기값, 학습됨)
@@ -243,18 +242,16 @@ def main():
         logger.info(f"   - Embedding Dim: {config.TGN_EMBEDDING_DIM}")
         logger.info(f"   - 파라미터: {sum(p.numel() for p in tgn_model.parameters()):,}")
         
-        # Track B: GraphSEAL
+        # Track B: GraphSEAL (DRNL Only)
         graphseal_model = GraphSEAL(
             embedding_dim=node_embeddings.shape[1],
             hidden_dim=config.GRAPHSEAL_HIDDEN_DIM,
-            num_hops=config.GRAPHSEAL_NUM_HOPS,
-            use_ukge=config.USE_UKGE
+            num_hops=config.GRAPHSEAL_NUM_HOPS
         )
         
-        logger.info(f"✅ Track B (GraphSEAL)")
+        logger.info(f"✅ Track B (GraphSEAL - DRNL Only)")
         logger.info(f"   - Hidden Dim: {config.GRAPHSEAL_HIDDEN_DIM}")
         logger.info(f"   - Num Hops: {config.GRAPHSEAL_NUM_HOPS}")
-        logger.info(f"   - UKGE: {config.USE_UKGE}")
         logger.info(f"   - 파라미터: {sum(p.numel() for p in graphseal_model.parameters()):,}")
         
         # Hybrid Model

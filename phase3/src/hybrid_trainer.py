@@ -162,14 +162,15 @@ class HybridTrainer:
                         timestamps=timestamps
                     )
                 
-                # GraphSEAL Forward (TGN 출력 활용)
-                logits, outputs = self.model.graphseal(
+                # GraphSEAL Forward (DRNL만 사용)
+                logits = self.model.graphseal(
                     src_nodes=src_nodes,
                     dst_nodes=dst_nodes,
                     node_embeddings=node_embeddings.to(self.device),
                     edge_index=edge_index.to(self.device),
                     tis_scores=None
                 )
+                outputs = None
                 
             else:
                 # Phase 3: Hybrid (전체 학습)

@@ -1,9 +1,9 @@
 """
-GraphSEAL: Structural Pattern Predictor with UKGE (Track B)
-===========================================================
-Sub-graph 패턴 기반 링크 예측 + TIS 기반 불확실성 반영
+GraphSEAL: Structural Pattern Predictor (Track B)
+=================================================
+DRNL (Distance Encoding) 기반 서브그래프 패턴 링크 예측
 
-UKGE: Uncertain Knowledge Graph Embedding
+[최적화] UKGE 제거 - TIS는 loss에서만 사용 (오버헤드 제거)
 """
 
 import torch
@@ -23,58 +23,6 @@ except ImportError:
         "torch_geometric not found. GraphSEAL will use slower Python BFS. "
         "Install with: pip install torch-geometric"
     )
-
-
-class UKGEConfidenceScorer(nn.Module):
-    """
-    TIS 기반 신뢰도 점수 생성
-    
-    UKGE의 핵심: 불확실한 엣지에 대해 신뢰도 점수 학습
-    """
-    
-    def __init__(self, embedding_dim: int, hidden_dim: int = 64):
-        super().__init__()
-        
-        # 신뢰도 점수 네트워크
-        self.confidence_net = nn.Sequential(
-            nn.Linear(embedding_dim * 2 + 1, hidden_dim),  # +1 for TIS
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(hidden_dim, 1),
-            nn.Sigmoid()  # 0~1 신뢰도
-        )
-    
-    def forward(
-        self,
-        src_emb: torch.Tensor,
-        dst_emb: torch.Tensor,
-        tis_scores: Optional[torch.Tensor] = None
-    ) -> torch.Tensor:
-        """
-        Parameters
-        ----------
-        src_emb : [E, D]
-        dst_emb : [E, D]
-        tis_scores : [E] (TIS 점수)
-        
-        Returns
-        -------
-        confidence : [E] (신뢰도 점수 0~1)
-        """
-        if tis_scores is None:
-            tis_scores = torch.ones(src_emb.shape[0], device=src_emb.device)
-        
-        # [E, 2D + 1]
-        x = torch.cat([
-            src_emb,
-            dst_emb,
-            tis_scores.unsqueeze(-1)
-        ], dim=-1)
-        
-        # [E, 1] -> [E]
-        confidence = self.confidence_net(x).squeeze(-1)
-        
-        return confidence
 
 
 class SubgraphEncoder(nn.Module):
@@ -233,35 +181,28 @@ class SubgraphEncoder(nn.Module):
 
 class GraphSEAL(nn.Module):
     """
-    GraphSEAL: Sub-graph based link prediction
+    GraphSEAL: DRNL 기반 서브그래프 링크 예측
     
-    + UKGE: TIS 기반 불확실성 고려
+    [최적화] UKGE 제거 - 가볍고 빠른 구조만 유지
+    TIS 정보는 loss function에서 처리하므로 중복 제거
     """
     
     def __init__(
         self,
         embedding_dim: int,
         hidden_dim: int = 128,
-        num_hops: int = 2,
-        use_ukge: bool = True
+        num_hops: int = 2
     ):
         super().__init__()
         
         self.embedding_dim = embedding_dim
-        self.use_ukge = use_ukge
         
         # 서브그래프 인코더
         self.subgraph_encoder = SubgraphEncoder(
             embedding_dim, num_hops, hidden_dim
         )
         
-        # UKGE 신뢰도 스코어러
-        if use_ukge:
-            self.confidence_scorer = UKGEConfidenceScorer(
-                embedding_dim, hidden_dim
-            )
-        
-        # 링크 예측 레이어
+        # 링크 예측 레이어 (간소화)
         self.link_predictor = nn.Sequential(
             nn.Linear(embedding_dim * 2, hidden_dim),
             nn.ReLU(),
@@ -277,10 +218,12 @@ class GraphSEAL(nn.Module):
         dst_nodes: torch.Tensor,
         node_embeddings: torch.Tensor,
         edge_index: torch.Tensor,
-        tis_scores: Optional[torch.Tensor] = None
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        tis_scores: Optional[torch.Tensor] = None  # 호환성 유지 (사용 안 함)
+    ) -> torch.Tensor:
         """
         링크 예측
+        
+        [최적화] UKGE 제거 - 단순 DRNL 기반 예측만 수행
         
         Parameters
         ----------
@@ -288,12 +231,11 @@ class GraphSEAL(nn.Module):
         dst_nodes : [E]
         node_embeddings : [N, D] (Phase 2 출력)
         edge_index : [2, E_train]
-        tis_scores : [E] (TIS 점수)
+        tis_scores : [E] (사용 안 함, 호환성만 유지)
         
         Returns
         -------
         logits : [E]
-        confidence : [E] or None
         """
         # 기본 임베딩
         src_emb = node_embeddings[src_nodes]  # [E, D]
@@ -308,14 +250,7 @@ class GraphSEAL(nn.Module):
         # 링크 예측 logits
         logits = self.link_predictor(edge_emb).squeeze(-1)  # [E]
         
-        # UKGE 신뢰도 점수
-        confidence = None
-        if self.use_ukge:
-            confidence = self.confidence_scorer(
-                src_emb, dst_emb, tis_scores
-            )
-        
-        return logits, confidence
+        return logits
     
     def get_subgraph_embeddings(
         self,
@@ -340,6 +275,8 @@ class HybridLinkPredictor(nn.Module):
     Ensemble: Track A (TGN) + Track B (GraphSEAL)
     
     두 모델의 logits를 가중 합산
+    
+    [최적화] UKGE 제거 - 단순 가중 평균만 수행
     """
     
     def __init__(
@@ -365,10 +302,12 @@ class HybridLinkPredictor(nn.Module):
         node_embeddings: torch.Tensor,
         edge_index: torch.Tensor,
         timestamps: Optional[torch.Tensor] = None,
-        tis_scores: Optional[torch.Tensor] = None
+        tis_scores: Optional[torch.Tensor] = None  # 호환성 유지
     ) -> Tuple[torch.Tensor, dict]:
         """
         Hybrid 예측
+        
+        [최적화] UKGE confidence 제거 - 단순 가중 평균
         
         Returns
         -------
@@ -377,7 +316,6 @@ class HybridLinkPredictor(nn.Module):
             {
                 'tgn_logits': [E],
                 'graphseal_logits': [E],
-                'confidence': [E] or None,
                 'alpha': float
             }
         """
@@ -388,25 +326,20 @@ class HybridLinkPredictor(nn.Module):
             timestamps
         )
         
-        # Track B: GraphSEAL
-        graphseal_logits, confidence = self.graphseal(
+        # Track B: GraphSEAL (DRNL만 사용)
+        graphseal_logits = self.graphseal(
             src_nodes, dst_nodes,
             node_embeddings, edge_index,
-            tis_scores
+            tis_scores  # 전달은 하지만 내부에서 사용 안 함
         )
         
         # Ensemble (가중 합산)
         alpha_clamped = torch.sigmoid(self.alpha)  # 0~1
         final_logits = alpha_clamped * tgn_logits + (1 - alpha_clamped) * graphseal_logits
         
-        # UKGE confidence로 추가 조정
-        if confidence is not None:
-            final_logits = final_logits * confidence
-        
         outputs = {
             'tgn_logits': tgn_logits,
             'graphseal_logits': graphseal_logits,
-            'confidence': confidence,
             'alpha': alpha_clamped.item()
         }
         
