@@ -365,21 +365,49 @@ class HybridTrainer:
         Recall@K 계산
         
         상위 K개 예측 중 실제 Positive가 몇 개 포함되는가?
-        """
-        # 상위 K개 인덱스
-        top_k_indices = np.argsort(scores)[-k:]
         
-        # Positive 개수
+        [디버깅] scores, labels 분포 확인
+        """
+        # [디버깅] 데이터 분포 확인
         num_positives = labels.sum()
+        num_total = len(labels)
         
         if num_positives == 0:
+            logger.warning(f"⚠️  No positive samples in validation set!")
             return 0.0
+        
+        # 상위 K개 인덱스 (점수가 높은 순서대로)
+        top_k_indices = np.argsort(scores)[-k:]
         
         # 상위 K개 중 Positive 개수
         num_hits = labels[top_k_indices].sum()
         
         # Recall
         recall = num_hits / num_positives
+        
+        # [디버깅] 상세 정보 출력 (첫 에폭에만)
+        if not hasattr(self, '_debug_printed'):
+            logger.info(f"\n📊 Recall@{k} 디버깅:")
+            logger.info(f"  - Total samples: {num_total}")
+            logger.info(f"  - Positive samples: {int(num_positives)} ({100*num_positives/num_total:.2f}%)")
+            logger.info(f"  - Score range: [{scores.min():.4f}, {scores.max():.4f}]")
+            logger.info(f"  - Score mean: {scores.mean():.4f}, std: {scores.std():.4f}")
+            logger.info(f"  - Top-{k} score threshold: {scores[top_k_indices[0]]:.4f}")
+            logger.info(f"  - Top-5 scores: {scores[top_k_indices[-5:]]}")
+            logger.info(f"  - Top-5 labels: {labels[top_k_indices[-5:]]}")
+            logger.info(f"  - Hits in top-{k}: {int(num_hits)}")
+            logger.info(f"  - Recall@{k}: {recall:.4f}")
+            
+            # 추가 진단: Positive 샘플들의 점수 분포
+            pos_indices = np.where(labels == 1)[0]
+            if len(pos_indices) > 0:
+                pos_scores = scores[pos_indices]
+                logger.info(f"  - Positive 점수 범위: [{pos_scores.min():.4f}, {pos_scores.max():.4f}]")
+                logger.info(f"  - Positive 점수 평균: {pos_scores.mean():.4f}")
+                logger.info(f"  - Positive 중 상위 5개: {np.sort(pos_scores)[-5:]}")
+            
+            logger.info("")
+            self._debug_printed = True
         
         return recall
     
