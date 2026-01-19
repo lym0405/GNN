@@ -254,7 +254,7 @@ class CurriculumTrainer:
             # 네거티브 샘플링 (커리큘럼)
             num_train_pos = train_pos_edges.shape[1]
             train_neg_edges, _ = sampler.sample(
-                num_samples=num_train_pos * 9,  # 1:9 비율
+                num_samples=num_train_pos * 2,  # 1:2 비율 (학습 속도 향상)
                 epoch=epoch,
                 total_epochs=epochs
             )

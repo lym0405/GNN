@@ -60,7 +60,7 @@ class Config:
     
     # 학습 하이퍼파라미터
     EPOCHS = 60
-    BATCH_SIZE = 1024
+    BATCH_SIZE = 4096  # 배치 크기 증가 (학습 속도 향상)
     LEARNING_RATE = 0.001
     WEIGHT_DECAY = 1e-5
     
