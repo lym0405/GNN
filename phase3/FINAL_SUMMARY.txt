@@ -1,0 +1,249 @@
+# Phase 3: Final Summary
+# ======================
+
+## ✅ 완성된 기능
+
+### 1. 핵심 모델 (Two-Track Hybrid)
+- ✅ Track A: SC-TGN (Temporal Graph Network)
+  - Memory 기반 과거 상호작용 기억
+  - 시간 인코딩 (Cosine 함수)
+  - GRU 메모리 업데이트
+
+- ✅ Track B: GraphSEAL (Structural Pattern)
+  - Sub-graph 패턴 학습 (k-hop 이웃)
+  - UKGE (Uncertain Knowledge Graph Embedding)
+  - TIS 기반 신뢰도 점수
+
+- ✅ Ensemble
+  - 학습 가능한 가중치 α
+  - Confidence-weighted 최종 예측
+
+### 2. 손실 함수 (Loss Function)
+- ✅ TIS-aware Soft Label BCE
+  - Positive: 1.0 - α * TIS
+  - Negative: 0.0 (또는 0.05)
+
+- ✅ Ranking Loss
+  - Positive 점수 > Negative 점수 + margin
+  - Margin = 0.5
+
+### 3. 네거티브 샘플링 (Negative Sampling)
+- ✅ Random Negative (50%)
+  - 무작위 기업쌍
+  - Self-loop, Positive 제거
+
+- ✅ Historical Negative (50%)
+  - 과거 존재했던 거래 (2020-2023)
+  - 더 어려운 네거티브
+
+### 4. 평가 메트릭 (Evaluation Metrics)
+- ✅ Recall@K (K=10, 50, 100, 500, 1000)
+  - 잠재 거래 발굴 능력
+
+- ✅ MRR (Mean Reciprocal Rank)
+  - 랭킹 정확도
+
+- ✅ RMSE (Risk-aware)
+  - Overall, Positive, Negative
+  - TIS-aware, Confidence-weighted
+
+### 5. 벤치마크 비교 (Benchmarks)
+- ✅ PA (Preferential Attachment)
+  - Score = degree(u) * degree(v)
+
+- ✅ RA (Resource Allocation)
+  - Score = Σ 1/degree(common_neighbor)
+
+- ✅ JC (Jaccard Coefficient)
+  - Score = |common| / |union|
+
+### 6. 견고성 테스트 (Robustness Test) - 옵션
+- ✅ Negative 비율 증가 (1:1 → 1:4)
+- ✅ 성능 변화 시각화
+
+---
+
+## 📂 생성된 파일
+
+### 핵심 모듈
+```
+src/
+├── temporal_graph_builder.py       # 시계열 그래프 데이터 빌더
+├── sc_tgn.py                        # Track A: SC-TGN
+├── graphseal.py                     # Track B: GraphSEAL + UKGE
+├── hybrid_trainer.py                # Hybrid 학습 (TIS-aware Loss 적용)
+├── phase3_loss.py                   # TIS-aware BCE + Ranking Loss
+├── negative_sampler_phase3.py       # Random + Historical Negative
+├── benchmarks.py                    # PA, RA, JC 벤치마크
+├── metrics.py                       # MRR, RMSE, Recall@K
+└── robustness_test.py               # 견고성 테스트
+```
+
+### 실행 스크립트
+```
+main_phase3_hybrid.py                # 전체 학습 (100 epochs)
+quick_test_phase3.py                 # 빠른 테스트 (5 epochs)
+evaluate_phase3_comprehensive.py     # 종합 평가 + 벤치마크
+```
+
+### 문서
+```
+PHASE3_README.md                     # 사용 설명서
+PHASE3_STRUCTURE.txt                 # 구조 설명
+requirements_phase3.txt              # 의존성
+```
+
+---
+
+## 🚀 실행 방법
+
+### 1. 의존성 설치
+```bash
+pip install -r requirements_phase3.txt
+```
+
+### 2. 빠른 테스트 (5 epochs, 5-10분)
+```bash
+python quick_test_phase3.py
+```
+
+### 3. 전체 학습 (100 epochs, 1-2시간)
+```bash
+python main_phase3_hybrid.py
+```
+
+### 4. 종합 평가 + 벤치마크 비교
+```bash
+python evaluate_phase3_comprehensive.py
+
+# 실행 중 질문:
+# "견고성 테스트를 실행하시겠습니까? (y/n)"
+# - y: 견고성 테스트 추가 실행 (10-20분)
+# - n: 건너뛰기
+```
+
+---
+
+## 📊 예상 출력
+
+### 1. 학습 완료 후
+```
+results/
+├── hybrid_model_best.pt             # 최고 성능 모델
+└── phase3_metrics.npz               # 학습/평가 메트릭
+```
+
+### 2. 종합 평가 완료 후
+```
+================================================================================
+Model           Recall@10    Recall@50    Recall@100   MRR         
+================================================================================
+GNN (Ours)      0.3245       0.5812       0.7234       0.4123      
+PA              0.1234       0.2456       0.3567       0.2012      
+RA              0.1567       0.2890       0.4123       0.2345      
+JC              0.1423       0.2712       0.3945       0.2198      
+================================================================================
+
+📊 RMSE (Risk-aware Prediction Error):
+----------------------------------------
+  - RMSE (Overall): 0.2145
+  - RMSE (Positive): 0.1934
+  - RMSE (Negative): 0.0234
+  - RMSE (TIS-aware): 0.1867
+  - RMSE (Confidence-weighted): 0.1789
+----------------------------------------
+```
+
+### 3. 견고성 테스트 완료 후 (옵션)
+```
+견고성 테스트 요약:
+----------------------------------------------------------------------
+Neg Ratio    Recall@10    Recall@50    MRR         
+----------------------------------------------------------------------
+1:1.0        0.3245       0.5812       0.4123      
+1:2.0        0.2834       0.5234       0.3789      
+1:3.0        0.2512       0.4856       0.3456      
+1:4.0        0.2298       0.4523       0.3201      
+----------------------------------------------------------------------
+
+📊 견고성 테스트 그래프 저장: results/robustness_test.png
+```
+
+---
+
+## 🎯 주요 특징
+
+### 1. TIS 기반 Risk-aware Learning
+- Positive 엣지: 1.0 - α * TIS (Soft Label)
+- TIS 높음 → Label 낮아짐 → 모델이 불확실성 학습
+
+### 2. Historical Negative Sampling
+- 과거 존재했던 거래 → 더 어려운 네거티브
+- Random + Historical 혼합 (50:50)
+
+### 3. Two-Track Ensemble
+- Track A (TGN): 시간의 흐름 반영
+- Track B (GraphSEAL): 구조적 패턴 반영
+- 학습 가능한 가중치로 최적 조합
+
+### 4. 종합 평가
+- GNN vs 휴리스틱 (PA, RA, JC) 비교
+- Recall@K, MRR, RMSE 다각도 분석
+- 견고성 테스트 (Negative 비율 증가)
+
+---
+
+## 💡 핵심 수식
+
+### 최종 예측 확률
+```
+P(u, v) = σ(Logit_hybrid × Confidence)
+
+where:
+  Logit_hybrid = α × Logit_TGN + (1-α) × Logit_GraphSEAL
+  Confidence = 1.0 - β × TIS(v)
+  α = σ(learnable_param)  # 학습됨
+```
+
+### Soft Label (TIS-aware)
+```
+Label_pos = 1.0 - α × TIS(v)
+Label_neg = 0.0
+```
+
+### Loss Function
+```
+Loss = BCE(Logit, SoftLabel) + λ × RankingLoss(Logit_pos, Logit_neg)
+```
+
+---
+
+## 🔍 다음 단계
+
+Phase 3 완료 후:
+
+1. **성능 분석**
+   - GNN이 벤치마크보다 얼마나 좋은가?
+   - Recall@10 vs Recall@100: Trade-off 분석
+
+2. **Track 기여도 분석**
+   - α 값 확인 (TGN vs GraphSEAL)
+   - 각 Track 단독 성능 vs Ensemble 성능
+
+3. **UKGE 효과 분석**
+   - TIS 높은 엣지 vs 낮은 엣지 예측 정확도
+   - Confidence-weighted RMSE 개선 정도
+
+4. **시계열 패턴 분석**
+   - 2023년 예측이 잘/못 되는 기업 특성
+   - 어떤 시기에 성능 변화?
+
+5. **실제 추천 시스템**
+   - 상위 K개 추천을 비즈니스에 적용
+   - A/B 테스트 설계
+
+---
+
+**작성일**: 2026-01-19  
+**버전**: 2.0  
+**상태**: ✅ 완료 (Benchmarks + Comprehensive Evaluation 포함)

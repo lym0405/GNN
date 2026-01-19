@@ -1,0 +1,11 @@
+# Phase 1: Production Recipe Estimation
+# 필수 패키지
+
+numpy>=1.21.0
+pandas>=1.3.0
+scipy>=1.7.0
+matplotlib>=3.4.0
+
+# 선택적 (성능 향상)
+scikit-learn>=1.0.0
+tqdm>=4.62.0

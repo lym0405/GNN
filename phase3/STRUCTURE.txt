@@ -1,0 +1,397 @@
+# Phase 3: Two-Track Hybrid Link Prediction - Structure
+# ======================================================
+
+## 파일 구조
+
+```
+Phase 3/
+├── src/
+│   ├── temporal_graph_builder.py       # 시계열 그래프 데이터 빌더
+│   ├── sc_tgn.py                        # Track A: SC-TGN (Temporal)
+│   ├── graphseal.py                     # Track B: GraphSEAL + UKGE
+│   ├── hybrid_trainer.py                # Hybrid 모델 학습 트레이너
+│   ├── phase3_loss.py                   # TIS-aware BCE + Ranking Loss
+│   ├── negative_sampler_phase3.py       # Random + Historical Negative Sampling
+│   ├── benchmarks.py                    # 휴리스틱 벤치마크 (PA, RA, JC)
+│   ├── metrics.py                       # 평가 메트릭 (MRR, RMSE, Recall@K)
+│   └── robustness_test.py               # 견고성 테스트 (옵션)
+│
+├── main_phase3_hybrid.py                # 전체 학습 (100 epochs) ⭐
+├── quick_test_phase3.py                 # 빠른 테스트 (5 epochs)
+├── evaluate_phase3_comprehensive.py     # 종합 평가 + 벤치마크 비교
+│
+├── requirements_phase3.txt              # Phase 3 의존성
+├── PHASE3_README.md                     # 문서 (이 파일)
+└── PHASE3_STRUCTURE.txt                 # 구조 설명
+
+data/
+├── raw/
+│   ├── firm_to_idx_model2.csv          # 기업 ID 매핑
+│   │   └── Columns: Unnamed: 0 (or firm_id), idx
+│   ├── posco_network_2020.csv          # 2020년 네트워크
+│   │   └── Columns: Unnamed: 0 (source), Unnamed: 1 (target)
+│   ├── posco_network_2021.csv          # 2021년 네트워크
+│   ├── posco_network_2022.csv          # 2022년 네트워크
+│   └── posco_network_2023.csv          # 2023년 네트워크
+│
+└── processed/ (Phase 1, 2 출력)
+    ├── disentangled_recipes.pkl        # Phase 1 레시피
+    ├── B_matrix.npy                     # Phase 1 B 행렬
+    ├── X_feature_matrix.npy             # Phase 2 노드 피처 (73 or 197 dim)
+    ├── node_embeddings_static.pt        # Phase 2 Static Embeddings (32 dim)
+    ├── train_edges.npy                  # Phase 2 Train 엣지
+    ├── test_edges.npy                   # Phase 2 Test 엣지
+    └── tis_score_normalized.npy         # Phase 2 TIS 점수
+
+results/
+├── hybrid_model_best.pt                 # 최고 성능 모델
+├── phase3_metrics.npz                   # 학습/평가 메트릭
+├── comprehensive_evaluation.npz         # 벤치마크 비교 결과
+└── robustness_test.png                  # 견고성 테스트 그래프 (옵션)
+```
+
+---
+
+## 데이터 흐름 (Data Flow)
+
+```
+[Phase 1: Recipe Estimation]
+    ↓
+data/processed/disentangled_recipes.pkl
+    ↓
+[Phase 2: Static Graph Embedding]
+    ↓
+data/processed/
+├── node_embeddings_static.pt (32 dim)
+├── X_feature_matrix.npy (73 or 197 dim)
+├── train_edges.npy
+├── test_edges.npy
+└── tis_score_normalized.npy
+    ↓
+[Phase 3: Temporal Graph Loading]
+    ↓
+data/raw/posco_network_20XX.csv (2020-2023)
+    ↓
+[Temporal Graph Builder]
+    ↓
+Time-ordered Event Stream:
+[(timestamp, src, dst, edge_feat), ...]
+    ↓
+[Train/Test Split]
+├── Train: 2020-2022 (80%)
+├── Val: 2020-2022 (20%)
+└── Test: 2023 (100%)
+    ↓
+[Negative Sampling]
+├── Random Negatives (50%)
+└── Historical Negatives (50%)
+    ↓
+[Two-Track Hybrid Model]
+├── Track A (SC-TGN): Temporal 동적 예측
+└── Track B (GraphSEAL): Structural 구조 예측
+    ↓
+[Ensemble]
+Final Logits = α * TGN + (1-α) * GraphSEAL
+    ↓
+[TIS-aware Loss]
+BCE + Ranking Loss (with Soft Labels)
+    ↓
+[Evaluation]
+├── Recall@K (10, 50, 100, 500, 1000)
+├── MRR (Mean Reciprocal Rank)
+└── RMSE (Risk-aware)
+    ↓
+[Benchmark Comparison]
+├── PA (Preferential Attachment)
+├── RA (Resource Allocation)
+└── JC (Jaccard Coefficient)
+    ↓
+[Robustness Test (Optional)]
+Negative Ratio: 1:1 → 1:4
+    ↓
+results/
+├── hybrid_model_best.pt
+├── phase3_metrics.npz
+├── comprehensive_evaluation.npz
+└── robustness_test.png
+```
+
+---
+
+## 모델 아키텍처 상세
+
+### Track A: SC-TGN (Supply Chain Temporal Graph Network)
+
+```
+[입력] Event Stream: (timestamp, src, dst, edge_feat)
+    ↓
+[Memory Module]
+    - 각 노드가 과거 상호작용 기억
+    - GRU 기반 메모리 업데이트
+    ↓
+[Time Encoder]
+    - 시간 간격 → Cosine 함수 인코딩
+    ↓
+[Message Aggregator]
+    - src ← dst, dst ← src
+    - 메시지 교환 및 집계
+    ↓
+[Memory Updater (GRU)]
+    - memory_t = GRU(memory_{t-1}, message_t)
+    ↓
+[Embedding Layer]
+    - h_src, h_dst = MLP(memory)
+    ↓
+[Link Predictor]
+    - logit = dot(h_src, h_dst)
+    ↓
+[출력] Temporal Logits (동적 예측)
+```
+
+### Track B: GraphSEAL (Structural Pattern + UKGE)
+
+```
+[입력] Static Embeddings (Phase 2 출력, 32 dim)
+    ↓
+[Subgraph Encoder]
+    - k-hop 이웃 정보 집계 (k=2)
+    - GraphSAGE 스타일 aggregation
+    ↓
+[Concatenation]
+    - emb_src || emb_dst || |emb_src - emb_dst|
+    ↓
+[MLP Link Predictor]
+    - 3-layer MLP (128 → 64 → 32 → 1)
+    ↓
+[UKGE Confidence Scorer]
+    - confidence = 1.0 - β * TIS(dst)
+    - TIS가 높으면 신뢰도 낮춤
+    ↓
+[출력] Structural Logits + Confidence
+```
+
+### Hybrid Ensemble
+
+```
+logit_A = Track A (TGN)
+logit_B = Track B (GraphSEAL)
+confidence = UKGE confidence
+
+α = sigmoid(learnable_param)  # 학습 가능한 가중치
+
+logit_hybrid = α * logit_A + (1 - α) * logit_B
+
+final_logit = logit_hybrid * confidence  # 신뢰도 반영
+
+P(u, v) = σ(final_logit)  # 최종 확률
+```
+
+---
+
+## 손실 함수 (Loss Function)
+
+### HybridLoss = TIS-aware BCE + Ranking Loss
+
+```python
+# 1. TIS 기반 Soft Label
+soft_label_pos = 1.0 - alpha * TIS(dst)  # Positive
+soft_label_neg = 0.0                      # Negative
+
+# 2. BCE Loss (Soft Label)
+bce_loss = BCEWithLogitsLoss(logits, soft_labels)
+
+# 3. Ranking Loss
+# Positive 점수가 Negative 점수보다 margin만큼 커야 함
+ranking_loss = MarginRankingLoss(pos_logits, neg_logits, margin=0.5)
+
+# 4. Total Loss
+total_loss = bce_loss + 0.1 * ranking_loss
+```
+
+---
+
+## 네거티브 샘플링 (Negative Sampling)
+
+### Random + Historical Negative
+
+```python
+# 1. Random Negative (50%)
+# - 무작위 기업쌍
+# - Self-loop, Positive 중복 제거
+
+# 2. Historical Negative (50%)
+# - 과거 연도(2020-2022)에 존재했지만
+#   현재(2023)에는 없는 거래 기업쌍
+# - 더 어려운 네거티브 (한번 거래했던 관계)
+
+# 최종 Negative = 0.5 * Random + 0.5 * Historical
+```
+
+---
+
+## 평가 메트릭 상세
+
+### 1. Recall@K (재현율)
+
+```
+상위 K개 예측 중 실제 Positive가 몇 개 포함되는가?
+
+Recall@K = (Top-K 중 Positive 개수) / (전체 Positive 개수)
+
+예시:
+- 전체 Positive: 100개
+- Top-50 예측 중 Positive: 35개
+- Recall@50 = 35 / 100 = 0.35
+```
+
+### 2. MRR (Mean Reciprocal Rank)
+
+```
+실제 Positive가 예측 랭킹에서 얼마나 상위에 위치하는가?
+
+MRR = (1 / rank_1 + 1 / rank_2 + ... + 1 / rank_n) / n
+
+예시:
+- Positive 3개가 예측 순위 1등, 5등, 10등
+- RR = [1/1, 1/5, 1/10] = [1.0, 0.2, 0.1]
+- MRR = (1.0 + 0.2 + 0.1) / 3 = 0.433
+```
+
+### 3. RMSE (Root Mean Squared Error)
+
+```
+예측값과 실제값(TIS 반영) 간의 오차
+
+RMSE = sqrt(mean((y_true - y_pred)^2))
+
+종류:
+- RMSE (Overall): 전체 데이터
+- RMSE (Positive): Positive 엣지만
+- RMSE (Negative): Negative 엣지만
+- RMSE (TIS-aware): Soft Label 기준
+- RMSE (Confidence-weighted): UKGE 신뢰도 가중
+```
+
+---
+
+## 벤치마크 휴리스틱 알고리즘
+
+### 1. PA (Preferential Attachment)
+
+```python
+# 차수(degree)가 높은 노드끼리 연결 확률 높음
+score(u, v) = degree(u) * degree(v)
+
+특징:
+- 가장 단순한 휴리스틱
+- Hub 노드 중심 예측
+```
+
+### 2. RA (Resource Allocation)
+
+```python
+# 공통 이웃이 많고, 이웃의 차수가 작을수록 높은 점수
+score(u, v) = Σ_{z ∈ common} 1 / degree(z)
+
+특징:
+- 공급망 생태계 유사성 반영
+- 공통 거래처가 많으면 높은 점수
+```
+
+### 3. JC (Jaccard Coefficient)
+
+```python
+# 두 노드의 이웃 집합 유사도
+score(u, v) = |common| / |union|
+
+특징:
+- 거래처 목록의 겹침 비율
+- 0~1 범위 (정규화된 점수)
+```
+
+---
+
+## 실행 순서
+
+### 1. Phase 1, 2 먼저 실행
+```bash
+python main_phase1.py
+python main_phase2.py
+```
+
+### 2. Phase 3 빠른 테스트
+```bash
+python quick_test_phase3.py
+```
+
+### 3. Phase 3 전체 학습
+```bash
+python main_phase3_hybrid.py
+```
+
+### 4. 종합 평가 + 벤치마크 비교
+```bash
+python evaluate_phase3_comprehensive.py
+```
+
+---
+
+## 출력 파일 상세
+
+### results/hybrid_model_best.pt
+- 학습된 Hybrid 모델 가중치
+- 크기: ~5-10 MB
+
+### results/phase3_metrics.npz
+```python
+{
+    'test_metrics': {
+        'recall@10': float,
+        'recall@50': float,
+        'recall@100': float,
+        'recall@500': float,
+        'recall@1000': float,
+        'MRR': float,
+        'rmse': float,
+        'rmse_pos': float,
+        'rmse_neg': float,
+        'rmse_tis_aware': float,
+        'rmse_weighted': float
+    },
+    'train_losses': [float, ...],  # Epoch별 Train Loss
+    'val_losses': [float, ...],    # Epoch별 Val Loss
+    'val_recalls': [float, ...]    # Epoch별 Val Recall@50
+}
+```
+
+### results/comprehensive_evaluation.npz
+```python
+{
+    'gnn_metrics': {
+        'recall@10': float,
+        'recall@50': float,
+        ...
+        'MRR': float,
+        'rmse': float,
+        ...
+    },
+    'benchmark_results': {
+        'PA': {'recall@10': float, 'MRR': float, ...},
+        'RA': {'recall@10': float, 'MRR': float, ...},
+        'JC': {'recall@10': float, 'MRR': float, ...}
+    },
+    'test_scores': np.ndarray,      # 예측 점수
+    'test_labels': np.ndarray,      # 실제 레이블
+    'test_confidences': np.ndarray  # UKGE 신뢰도
+}
+```
+
+### results/robustness_test.png (옵션)
+- Negative 비율에 따른 성능 변화 그래프
+- 3개 subplot: Recall@10, Recall@50, MRR
+
+---
+
+**작성일**: 2026-01-19  
+**버전**: 2.0 (Benchmarks & Comprehensive Evaluation 추가)  
+**작성자**: GNN Pipeline (Phase 3)

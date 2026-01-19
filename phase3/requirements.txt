@@ -1,0 +1,30 @@
+# Phase 3 Requirements
+# Two-Track Hybrid Link Prediction (TGN + GraphSEAL)
+
+# Phase 1, 2 의존성 포함
+numpy>=1.21.0
+pandas>=1.3.0
+scipy>=1.7.0
+matplotlib>=3.4.0
+
+# PyTorch (CPU 또는 GPU)
+torch>=2.0.0
+torchvision>=0.15.0
+
+# PyTorch Geometric (GNN 라이브러리)
+torch-geometric>=2.3.0
+
+# PyTorch Geometric 의존성
+torch-scatter>=2.1.0
+torch-sparse>=0.6.15
+
+# 추가 유틸리티
+scikit-learn>=1.0.0
+tqdm>=4.62.0
+
+# 시각화
+seaborn>=0.11.0
+
+# (선택) Jupyter Notebook
+jupyter>=1.0.0
+ipykernel>=6.0.0
