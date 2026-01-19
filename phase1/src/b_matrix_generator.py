@@ -58,27 +58,18 @@ class BMatrixGenerator:
             print(f"   ⚠️  업체번호 컬럼을 찾을 수 없어 '{col_id}' 사용")
         
         # IO 테이블(33개)과 매칭: IO상품_단일_대분류_코드 사용
-        col_sec = None
-        # 1순위: IO상품_단일_대분류_코드
-        if 'IO상품_단일_대분류_코드' in df_firm.columns:
-            col_sec = 'IO상품_단일_대분류_코드'
-        else:
-            # 2순위: IO상품 관련 컬럼
+        col_sec = 'IO상품_단일_대분류_코드'
+        # 1순위: IO상품_단일_대분류_코드      
+        # 3순위: 산업코드 (더미 데이터용)
+        if col_sec is None:
             for c in df_firm.columns:
                 if 'IO상품' in c and '단일' in c and '대분류' in c and '코드' in c:
                     col_sec = c
+                    print(f"   ⚠️  IO상품 컬럼을 찾을 수 없어 '{col_sec}' 사용 (더미 데이터?)")
                     break
-            
-            # 3순위: 산업코드 (더미 데이터용)
-            if col_sec is None:
-                for c in df_firm.columns:
-                    if '산업코드' in c or 'sector' in c.lower() or 'industry' in c.lower():
-                        col_sec = c
-                        print(f"   ⚠️  IO상품 컬럼을 찾을 수 없어 '{col_sec}' 사용 (더미 데이터?)")
-                        break
-            
-            # 4순위: 없으면 에러
-            if col_sec is None:
+
+        # 4순위: 없으면 에러
+        if col_sec is None:
                 raise ValueError(f"IO 산업 매핑 컬럼을 찾을 수 없습니다. 사용 가능한 컬럼: {list(df_firm.columns[:10])}")
         
         df_firm['clean_biz'] = self._normalize(df_firm[col_biz])
