@@ -108,6 +108,58 @@
 
 ---
 
+### Phase 1: Main Script (`phase1/main_phase1.py`)
+
+#### ✅ 수정 완료
+**변경 내용**:
+
+1. **`build_sector_mapping` 함수 수정**:
+```python
+# Before
+for col in ['산업코드', 'sector_code', 'industry_code', 'ksic']:
+    if col in row and pd.notna(row[col]):
+        sector_code = str(row[col])
+        break
+
+# After (1순위)
+if 'IO상품_단일_대분류_코드' in row and pd.notna(row['IO상품_단일_대분류_코드']):
+    sector_code = str(row['IO상품_단일_대분류_코드']).strip()
+
+# After (2순위): IO상품 관련 컬럼 부분 매칭
+for col in firm_info.columns:
+    if 'IO상품' in col and '단일' in col and '대분류' in col and '코드' in col:
+        ...
+
+# After (3순위): 더미 데이터용 폴백
+for col in ['산업코드', 'sector_code', 'industry_code', 'io_sector']:
+    ...
+```
+
+2. **`build_revenue_share` 함수 수정**:
+```python
+# Before
+for col in ['tg_2024_final', 'revenue', 'sales', 'total_sales']:
+    if col in revenue.columns:
+        revenue_col = col
+        break
+
+# After (1순위)
+if 'tg_2024_final' in revenue.columns:
+    revenue_col = 'tg_2024_final'  # structure 문서 기준
+
+# After (2순위)
+for col in ['tg_2024', 'revenue', 'sales', 'total_sales', '매출액']:
+    ...
+```
+
+**주요 개선점**:
+- `b_matrix_generator.py`와 동일한 컬럼 우선순위 적용
+- `IO상품_단일_대분류_코드` 1순위 사용
+- `tg_2024_final` 매출 컬럼 우선 처리
+- 더미 데이터 호환성 유지 (폴백 로직)
+
+---
+
 ### Phase 3: Temporal Graph Builder (`phase3/src/temporal_graph_builder.py`)
 
 #### ✅ 수정 완료
@@ -277,7 +329,7 @@ Historical Negatives: 2020-2023년 과거 거래 데이터
 
 ## 📝 변경 파일 목록
 
-### 수정된 파일
+### 변경된 파일
 1. ✅ `phase3/src/temporal_graph_builder.py`
    - 파일명: `posco_network_capital_consumergoods_removed_{year}.csv` 우선 사용
    - 컬럼명: `사업자등록번호`, `거래처사업자등록번호`, `총공급금액` 우선 처리
@@ -287,8 +339,13 @@ Historical Negatives: 2020-2023년 과거 거래 데이터
    - 파일명: 긴 이름/짧은 이름 모두 지원
    - 컬럼명: 한글/영문 폴백 로직 유지
 
+3. ✅ `phase1/main_phase1.py`
+   - `build_sector_mapping`: `IO상품_단일_대분류_코드` 1순위 사용
+   - `build_revenue_share`: `tg_2024_final` 1순위 사용
+   - `b_matrix_generator.py`와 동일한 로직 적용
+
 ### 변경 없는 파일 (이미 올바름)
-3. ✅ `phase1/src/b_matrix_generator.py`
+4. ✅ `phase1/src/b_matrix_generator.py`
    - `IO상품_단일_대분류_코드` 이미 1순위로 사용 중
    - 매핑 성공률 출력 이미 구현됨
 

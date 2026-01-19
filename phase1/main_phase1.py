@@ -151,6 +151,9 @@ def build_sector_mapping(firm_info: pd.DataFrame, firm_ids: list):
     """
     기업 → 산업 매핑 생성
     
+    structure 문서 기준:
+    - IO상품_단일_대분류_코드: Phase 1 레시피 추정용 (33개 대분류)
+    
     Returns
     -------
     biz_sector_map : dict
@@ -166,20 +169,42 @@ def build_sector_mapping(firm_info: pd.DataFrame, firm_ids: list):
     for _, row in firm_info.iterrows():
         biz_no = row['사업자등록번호']
         
-        # 산업코드 추출 (여러 컬럼명 가능)
+        # IO 상품 코드 추출 (컬럼명 우선순위)
         sector_code = None
-        for col in ['산업코드', 'sector_code', 'industry_code', 'ksic']:
-            if col in row and pd.notna(row[col]):
-                sector_code = str(row[col])
-                break
+        
+        # 1순위: IO상품_단일_대분류_코드 (실제 데이터, structure 문서 기준)
+        if 'IO상품_단일_대분류_코드' in row and pd.notna(row['IO상품_단일_대분류_코드']):
+            sector_code = str(row['IO상품_단일_대분류_코드']).strip()
+        else:
+            # 2순위: IO상품 관련 컬럼 (부분 매칭)
+            for col in firm_info.columns:
+                if 'IO상품' in col and '단일' in col and '대분류' in col and '코드' in col:
+                    if pd.notna(row[col]):
+                        sector_code = str(row[col]).strip()
+                        break
+            
+            # 3순위: 더미 데이터용 컬럼명
+            if sector_code is None:
+                for col in ['산업코드', 'sector_code', 'industry_code', 'io_sector']:
+                    if col in row and pd.notna(row[col]):
+                        sector_code = str(row[col])
+                        break
         
         if sector_code:
             try:
-                # 산업코드를 인덱스로 변환 (1~33 → 0~32)
-                sector_idx = int(sector_code) - 1
+                # IO 상품 코드를 인덱스로 변환
+                # IO 코드는 1~33 범위이므로 0-based index로 변환
+                sector_idx = int(sector_code)
+                
+                # 1-based index라면 0-based로 변환
+                if 1 <= sector_idx <= 33:
+                    sector_idx = sector_idx - 1
+                
+                # 0-based index가 유효한지 확인
                 if 0 <= sector_idx < 33:
                     biz_sector_map[biz_no] = sector_idx
-            except:
+            except (ValueError, TypeError):
+                # 변환 실패 시 무시
                 pass
     
     logger.info(f"   ✓ 매핑 완료: {len(biz_sector_map)} 기업")
@@ -199,6 +224,9 @@ def build_revenue_share(revenue: pd.DataFrame, biz_sector_map: dict):
     """
     산업별 매출 점유율 계산
     
+    structure 문서 기준:
+    - final_tg_2024_estimation.csv: tg_2024_final (최종 매출액)
+    
     Returns
     -------
     biz_share_map : dict
@@ -206,18 +234,26 @@ def build_revenue_share(revenue: pd.DataFrame, biz_sector_map: dict):
     """
     logger.info("💰 산업별 매출 점유율 계산 중...")
     
-    # 업체번호 → 사업자등록번호 변환 (필요시)
+    # 업체번호 정규화
     revenue['업체번호'] = revenue['업체번호'].astype(str)
     
-    # 매출 컬럼 찾기
+    # 매출 컬럼 찾기 (우선순위 기반)
     revenue_col = None
-    for col in ['tg_2024_final', 'revenue', 'sales', 'total_sales']:
-        if col in revenue.columns:
-            revenue_col = col
-            break
+    
+    # 1순위: tg_2024_final (structure 문서 기준)
+    if 'tg_2024_final' in revenue.columns:
+        revenue_col = 'tg_2024_final'
+    else:
+        # 2순위: 기타 매출 관련 컬럼
+        for col in ['tg_2024', 'revenue', 'sales', 'total_sales', '매출액']:
+            if col in revenue.columns:
+                revenue_col = col
+                logger.info(f"   📋 매출 컬럼: '{revenue_col}' 사용 (tg_2024_final 없음)")
+                break
     
     if not revenue_col:
         logger.warning("   ⚠️ 매출 컬럼을 찾을 수 없습니다. 점유율 계산 생략.")
+        logger.warning(f"   사용 가능한 컬럼: {list(revenue.columns[:10])}")
         return {}
     
     # 산업별 매출 집계
