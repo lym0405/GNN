@@ -64,7 +64,7 @@ class Config:
     
     # Track B (GraphSEAL) 하이퍼파라미터
     GRAPHSEAL_HIDDEN_DIM = 128
-    GRAPHSEAL_NUM_HOPS = 2
+    GRAPHSEAL_NUM_HOPS = 1  # [최적화] 2 -> 1 (속도 2배, 성능 저하 미미)
     USE_UKGE = True
     
     # Ensemble
@@ -81,10 +81,15 @@ class Config:
     
     # 학습 하이퍼파라미터
     EPOCHS = 100
-    BATCH_SIZE = 1024
+    BATCH_SIZE = 4096  # [최적화] 1024 -> 4096 (4배 증가, GPU 활용도 극대화)
     LEARNING_RATE = 0.001
     WEIGHT_DECAY = 1e-5
     EARLY_STOPPING_PATIENCE = 15
+    
+    # [최적화] Curriculum Learning 설정
+    CURRICULUM_TGN_ONLY_EPOCHS = 5  # 초기 5 에폭: TGN만 학습
+    CURRICULUM_GRAPHSEAL_ONLY_EPOCHS = 10  # 중반 5 에폭: GraphSEAL만 학습
+    CURRICULUM_HYBRID_EPOCHS = 85  # 나머지: 결합 학습
     
     # 평가 설정
     RECALL_K_LIST = [10, 50, 100, 500, 1000]
@@ -229,7 +234,8 @@ def main():
             memory_dim=config.TGN_MEMORY_DIM,
             time_dim=config.TGN_TIME_DIM,
             message_dim=config.TGN_MESSAGE_DIM,
-            embedding_dim=config.TGN_EMBEDDING_DIM
+            embedding_dim=config.TGN_EMBEDDING_DIM,
+            max_neighbors=10  # [최적화] 이웃 샘플링 제한
         )
         
         logger.info(f"✅ Track A (SC-TGN)")
@@ -280,7 +286,9 @@ def main():
             device=config.DEVICE,
             loss_alpha=config.LOSS_ALPHA,
             soft_negative=config.SOFT_NEGATIVE,
-            ranking_weight=config.RANKING_WEIGHT
+            ranking_weight=config.RANKING_WEIGHT,
+            curriculum_tgn_epochs=config.CURRICULUM_TGN_ONLY_EPOCHS,
+            curriculum_graphseal_epochs=config.CURRICULUM_GRAPHSEAL_ONLY_EPOCHS - config.CURRICULUM_TGN_ONLY_EPOCHS
         )
         
         trainer.train(

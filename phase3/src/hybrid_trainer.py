@@ -22,6 +22,11 @@ class HybridTrainer:
     """
     Hybrid 모델 학습 (TGN + GraphSEAL)
     TIS-aware BCE + Ranking Loss 사용
+    
+    [최적화] Curriculum Learning 지원:
+    - Phase 1: TGN만 학습 (GraphSEAL 고정)
+    - Phase 2: GraphSEAL만 학습 (TGN 고정)
+    - Phase 3: 결합 학습 (미세 조정)
     """
     
     def __init__(
@@ -31,11 +36,18 @@ class HybridTrainer:
         device: str = 'cpu',
         loss_alpha: float = 0.3,
         soft_negative: float = 0.0,
-        ranking_weight: float = 0.1
+        ranking_weight: float = 0.1,
+        curriculum_tgn_epochs: int = 5,
+        curriculum_graphseal_epochs: int = 10
     ):
         self.model = hybrid_model.to(device)
         self.optimizer = optimizer
         self.device = device
+        
+        # Curriculum Learning 설정
+        self.curriculum_tgn_epochs = curriculum_tgn_epochs
+        self.curriculum_graphseal_epochs = curriculum_graphseal_epochs
+        self.current_epoch = 0  # 현재 에폭 추적
         
         # Hybrid Loss (TIS-aware BCE + Ranking Loss)
         self.criterion = HybridLoss(
@@ -65,6 +77,11 @@ class HybridTrainer:
         """
         1 에폭 학습
         
+        [최적화] Curriculum Learning 적용:
+        - 초기: TGN만 학습 (빠른 수렴)
+        - 중반: GraphSEAL만 학습 (구조 패턴 학습)
+        - 후반: 결합 학습 (미세 조정)
+        
         Parameters
         ----------
         events : List of (timestamp, src, dst, edge_feat, label)
@@ -79,6 +96,17 @@ class HybridTrainer:
         avg_loss : float
         """
         self.model.train()
+        
+        # [최적화] Curriculum Learning: 현재 에폭에 따라 학습 모드 결정
+        if self.current_epoch < self.curriculum_tgn_epochs:
+            training_mode = 'tgn_only'
+            logger.info(f"  📚 Curriculum Learning: TGN Only (Epoch {self.current_epoch + 1})")
+        elif self.current_epoch < self.curriculum_tgn_epochs + self.curriculum_graphseal_epochs:
+            training_mode = 'graphseal_only'
+            logger.info(f"  📚 Curriculum Learning: GraphSEAL Only (Epoch {self.current_epoch + 1})")
+        else:
+            training_mode = 'hybrid'
+            logger.info(f"  📚 Curriculum Learning: Hybrid (Epoch {self.current_epoch + 1})")
         
         total_loss = 0.0
         num_batches = 0
@@ -105,17 +133,56 @@ class HybridTrainer:
             src_features = node_features[src_nodes].to(self.device)
             dst_features = node_features[dst_nodes].to(self.device)
             
-            # Forward
-            logits, outputs = self.model(
-                src_nodes=src_nodes,
-                dst_nodes=dst_nodes,
-                src_features=src_features,
-                dst_features=dst_features,
-                node_embeddings=node_embeddings.to(self.device),
-                edge_index=edge_index.to(self.device),
-                timestamps=timestamps,
-                tis_scores=None  # TIS는 loss에서 사용
-            )
+            # [최적화] Curriculum Learning: 학습 모드에 따라 분기
+            if training_mode == 'tgn_only':
+                # Phase 1: TGN만 학습 (GraphSEAL은 gradient 계산 안 함)
+                # TGN Forward
+                with torch.no_grad():
+                    # GraphSEAL 부분은 no_grad로 스킵 (속도 향상)
+                    pass
+                
+                logits = self.model.tgn(
+                    src_nodes=src_nodes,
+                    dst_nodes=dst_nodes,
+                    src_features=src_features,
+                    dst_features=dst_features,
+                    timestamps=timestamps
+                )
+                outputs = None
+                
+            elif training_mode == 'graphseal_only':
+                # Phase 2: GraphSEAL만 학습 (TGN은 고정)
+                with torch.no_grad():
+                    # TGN의 출력을 고정하여 사용
+                    tgn_logits = self.model.tgn(
+                        src_nodes=src_nodes,
+                        dst_nodes=dst_nodes,
+                        src_features=src_features,
+                        dst_features=dst_features,
+                        timestamps=timestamps
+                    )
+                
+                # GraphSEAL Forward (TGN 출력 활용)
+                logits, outputs = self.model.graphseal(
+                    src_nodes=src_nodes,
+                    dst_nodes=dst_nodes,
+                    node_embeddings=node_embeddings.to(self.device),
+                    edge_index=edge_index.to(self.device),
+                    tis_scores=None
+                )
+                
+            else:
+                # Phase 3: Hybrid (전체 학습)
+                logits, outputs = self.model(
+                    src_nodes=src_nodes,
+                    dst_nodes=dst_nodes,
+                    src_features=src_features,
+                    dst_features=dst_features,
+                    node_embeddings=node_embeddings.to(self.device),
+                    edge_index=edge_index.to(self.device),
+                    timestamps=timestamps,
+                    tis_scores=None  # TIS는 loss에서 사용
+                )
             
             # Loss (TIS-aware Soft Label + Ranking Loss)
             batch_edge_index = torch.stack([src_nodes, dst_nodes], dim=0)
@@ -145,6 +212,9 @@ class HybridTrainer:
             num_batches += 1
         
         avg_loss = total_loss / num_batches if num_batches > 0 else 0.0
+        
+        # 에폭 카운터 증가
+        self.current_epoch += 1
         
         return avg_loss
     

@@ -172,6 +172,8 @@ class SC_TGN(nn.Module):
     Supply Chain Temporal Graph Network
     
     시계열 거래 네트워크에서 미래 링크 예측
+    
+    [최적화] Neighbor Sampling 제한으로 속도 향상
     """
     
     def __init__(
@@ -182,7 +184,8 @@ class SC_TGN(nn.Module):
         memory_dim: int = 128,
         time_dim: int = 32,
         message_dim: int = 128,
-        embedding_dim: int = 64
+        embedding_dim: int = 64,
+        max_neighbors: int = 10  # [최적화] 최대 이웃 수 제한
     ):
         super().__init__()
         
@@ -191,6 +194,7 @@ class SC_TGN(nn.Module):
         self.edge_dim = edge_dim
         self.memory_dim = memory_dim
         self.embedding_dim = embedding_dim
+        self.max_neighbors = max_neighbors  # [최적화] 이웃 샘플링 제한
         
         # 모듈들
         self.memory = MemoryModule(num_nodes, memory_dim)
@@ -255,6 +259,8 @@ class SC_TGN(nn.Module):
         """
         배치 단위 메모리 업데이트
         
+        [최적화] 최신 N개 이웃만 고려 (전체 이웃 대신)
+        
         Parameters
         ----------
         src_nodes : torch.Tensor [E]
@@ -274,7 +280,7 @@ class SC_TGN(nn.Module):
             src_memory, dst_memory, edge_features, time_encoding
         )
         
-        # 각 노드별 메시지 집계 (평균)
+        # 각 노드별 메시지 집계
         unique_nodes = torch.cat([src_nodes, dst_nodes]).unique()
         
         for node in unique_nodes:
@@ -284,7 +290,18 @@ class SC_TGN(nn.Module):
             mask = mask_src | mask_dst
             
             if mask.sum() > 0:
-                node_messages = messages[mask].mean(dim=0, keepdim=True)
+                # [최적화] 최신 N개 메시지만 사용 (시간 역순 정렬 후 샘플링)
+                node_messages_all = messages[mask]
+                node_timestamps = timestamps[mask]
+                
+                # 시간 역순 정렬
+                sorted_indices = torch.argsort(node_timestamps, descending=True)
+                
+                # 최신 max_neighbors개만 선택
+                if sorted_indices.shape[0] > self.max_neighbors:
+                    sorted_indices = sorted_indices[:self.max_neighbors]
+                
+                node_messages = node_messages_all[sorted_indices].mean(dim=0, keepdim=True)
                 
                 # 메모리 업데이트
                 current_memory = self.memory.get_memory(node.unsqueeze(0))
