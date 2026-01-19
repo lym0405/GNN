@@ -135,7 +135,7 @@ def main():
         # ============================================================
         
         logger.info("\n[Step 1] 그래프 데이터 로드")
-        builder = StaticGraphBuilder(data_dir=str(config.DATA_DIR))
+        builder = StaticGraphBuilder(data_dir=str(config.DATA_DIR), use_cache=True)
         
         X, edge_index, edge_attr, firm_ids = builder.build_static_data(
             use_simple_features=config.USE_SIMPLE_FEATURES

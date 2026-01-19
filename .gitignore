@@ -54,6 +54,9 @@ data/raw/*.csv
 data/processed/*.pkl
 data/processed/*.pt
 
+# Cache (Phase 2/3 그래프 데이터)
+data/processed/cache/
+
 # Results
 results/
 *.png

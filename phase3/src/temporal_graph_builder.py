@@ -22,10 +22,15 @@ class TemporalGraphBuilder:
     TGN 학습용 Temporal Event Stream 생성
     """
     
-    def __init__(self, data_dir: str):
+    def __init__(self, data_dir: str, use_cache: bool = True):
         self.data_dir = Path(data_dir).resolve()  # 절대 경로로 변환
         self.raw_dir = self.data_dir / "raw"
         self.processed_dir = self.data_dir / "processed"
+        self.use_cache = use_cache
+        
+        # 캐시 디렉토리
+        self.cache_dir = self.processed_dir / "cache"
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
         
         # 시계열 데이터
         self.years = [2020, 2021, 2022, 2023]
@@ -52,6 +57,28 @@ class TemporalGraphBuilder:
                 'year_boundaries': Dict[year -> event_idx]
             }
         """
+        # 캐시 파일 경로
+        cache_file = self.cache_dir / "temporal_data.pkl"
+        
+        # 캐시 확인
+        if self.use_cache and cache_file.exists():
+            logger.info("=" * 70)
+            logger.info("📦 캐시된 시계열 그래프 데이터 로드")
+            logger.info("=" * 70)
+            
+            import pickle
+            with open(cache_file, 'rb') as f:
+                temporal_data = pickle.load(f)
+            
+            logger.info(f"   ✓ 총 이벤트: {len(temporal_data['events']):,}")
+            logger.info(f"   ✓ 노드 수: {temporal_data['num_nodes']:,}")
+            logger.info(f"   ✓ Train 이벤트: {temporal_data['train_mask'].sum():,}")
+            logger.info(f"   ✓ Test 이벤트: {temporal_data['test_mask'].sum():,}")
+            logger.info("=" * 70)
+            
+            return temporal_data
+        
+        # 캐시가 없으면 새로 생성
         logger.info("=" * 70)
         logger.info("🕐 시계열 그래프 데이터 구축 시작")
         logger.info("=" * 70)
@@ -94,6 +121,14 @@ class TemporalGraphBuilder:
             'node_features': node_features,
             'year_boundaries': year_boundaries
         }
+        
+        # 캐시 저장
+        if self.use_cache:
+            logger.info("  💾 캐시 저장 중...")
+            import pickle
+            with open(cache_file, 'wb') as f:
+                pickle.dump(temporal_data, f)
+            logger.info(f"     ✓ 캐시 저장: {cache_file}")
         
         logger.info("=" * 70)
         return temporal_data

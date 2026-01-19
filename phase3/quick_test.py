@@ -121,7 +121,7 @@ def main():
         
         logger.info("\n[Step 1] 시계열 그래프 데이터 로드")
         
-        builder = TemporalGraphBuilder(data_dir=str(config.DATA_DIR))
+        builder = TemporalGraphBuilder(data_dir=str(config.DATA_DIR), use_cache=True)
         temporal_data = builder.build_temporal_data(train_ratio=0.8)
         
         events = temporal_data['events']

@@ -31,10 +31,15 @@ class StaticGraphBuilder:
     GraphSAGE 학습용 피처 행렬 생성
     """
     
-    def __init__(self, data_dir: str):
+    def __init__(self, data_dir: str, use_cache: bool = True):
         self.data_dir = Path(data_dir)
         self.raw_dir = self.data_dir / "raw"
         self.processed_dir = self.data_dir / "processed"
+        self.use_cache = use_cache
+        
+        # 캐시 디렉토리
+        self.cache_dir = self.processed_dir / "cache"
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
         
         # IO 산업 코드 (33개)
         self.io_sectors = ['A', 'B', 'C01', 'C02', 'C03', 'C04', 'C05', 'C06', 'C07', 'C08', 'C09', 
@@ -62,6 +67,35 @@ class StaticGraphBuilder:
         firm_ids : list
             기업 ID 리스트
         """
+        # 캐시 파일 경로
+        cache_suffix = "simple" if use_simple_features else "full"
+        cache_files = {
+            'X': self.cache_dir / f"static_X_{cache_suffix}.npy",
+            'edge_index': self.cache_dir / "static_edge_index.pt",
+            'edge_attr': self.cache_dir / "static_edge_attr.pt",
+            'firm_ids': self.cache_dir / "static_firm_ids.pkl"
+        }
+        
+        # 캐시 확인
+        if self.use_cache and all(f.exists() for f in cache_files.values()):
+            logger.info("=" * 70)
+            logger.info("📦 캐시된 정적 그래프 데이터 로드")
+            logger.info("=" * 70)
+            
+            X = np.load(cache_files['X'])
+            edge_index = torch.load(cache_files['edge_index'])
+            edge_attr = torch.load(cache_files['edge_attr'])
+            with open(cache_files['firm_ids'], 'rb') as f:
+                firm_ids = pickle.load(f)
+            
+            logger.info(f"   ✓ 노드 수: {len(firm_ids):,}")
+            logger.info(f"   ✓ 피처 차원: {X.shape[1]}")
+            logger.info(f"   ✓ 엣지 수: {edge_index.shape[1]:,}")
+            logger.info("=" * 70)
+            
+            return X, edge_index, edge_attr, firm_ids
+        
+        # 캐시가 없으면 새로 생성
         logger.info("=" * 70)
         logger.info("📊 정적 그래프 데이터 구축")
         logger.info("=" * 70)
@@ -100,6 +134,16 @@ class StaticGraphBuilder:
         else:
             X = self._build_full_features(firm_ids, N)
             logger.info(f"   ✓ 피처 차원: {X.shape[1]} (전체 버전)")
+        
+        # 캐시 저장
+        if self.use_cache:
+            logger.info("4️⃣ 캐시 저장...")
+            np.save(cache_files['X'], X)
+            torch.save(edge_index, cache_files['edge_index'])
+            torch.save(edge_attr, cache_files['edge_attr'])
+            with open(cache_files['firm_ids'], 'wb') as f:
+                pickle.dump(firm_ids, f)
+            logger.info(f"   ✓ 캐시 저장: {self.cache_dir}")
         
         logger.info("=" * 70)
         
