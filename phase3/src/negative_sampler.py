@@ -102,14 +102,26 @@ class Phase3NegativeSampler:
             try:
                 df = pd.read_csv(file_path)
                 
-                # 컬럼명 확인
-                if 'Unnamed: 0' in df.columns and 'Unnamed: 1' in df.columns:
-                    src_col, dst_col = 'Unnamed: 0', 'Unnamed: 1'
-                elif 'source' in df.columns and 'target' in df.columns:
-                    src_col, dst_col = 'source', 'target'
-                elif 'src' in df.columns and 'dst' in df.columns:
-                    src_col, dst_col = 'src', 'dst'
-                else:
+                # 컬럼명 확인 (structure 문서 기준)
+                src_col = None
+                dst_col = None
+                
+                # 1순위: 한글 컬럼명 (실제 데이터)
+                if '사업자등록번호' in df.columns:
+                    src_col = '사업자등록번호'
+                if '거래처사업자등록번호' in df.columns:
+                    dst_col = '거래처사업자등록번호'
+                
+                # 2순위: 영문 컬럼명 (더미 데이터)
+                if src_col is None and dst_col is None:
+                    if 'Unnamed: 0' in df.columns and 'Unnamed: 1' in df.columns:
+                        src_col, dst_col = 'Unnamed: 0', 'Unnamed: 1'
+                    elif 'source' in df.columns and 'target' in df.columns:
+                        src_col, dst_col = 'source', 'target'
+                    elif 'src' in df.columns and 'dst' in df.columns:
+                        src_col, dst_col = 'src', 'dst'
+                
+                if src_col is None or dst_col is None:
                     logger.warning(f"⚠️  {file_path.name}: 컬럼명 불일치")
                     continue
                 

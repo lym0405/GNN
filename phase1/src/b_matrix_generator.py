@@ -34,7 +34,9 @@ class BMatrixGenerator:
         df_firm = pd.read_csv(firm_info_path, dtype=str)
         col_biz = next(c for c in df_firm.columns if '사업자' in c and '번호' in c)
         col_id = next(c for c in df_firm.columns if '업체번호' in c)
-        col_sec = next(c for c in df_firm.columns if 'IO' in c and '대분류' in c)
+        # IO 테이블(33개)과 매칭: IO상품_단일_대분류_코드 사용
+        col_sec = next((c for c in df_firm.columns if c == 'IO상품_단일_대분류_코드'), 
+                       next(c for c in df_firm.columns if 'IO상품' in c and '단일' in c and '대분류' in c and '코드' in c))
         
         df_firm['clean_biz'] = self._normalize(df_firm[col_biz])
         df_firm['clean_id'] = self._normalize(df_firm[col_id])

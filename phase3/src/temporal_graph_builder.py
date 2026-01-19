@@ -143,14 +143,37 @@ class TemporalGraphBuilder:
             df = df.drop(columns=['Unnamed: 0'])
         
         # source/target 컬럼명 확인
+        # structure 문서에 따르면: 사업자등록번호, 거래처사업자등록번호
         source_col = None
         target_col = None
         
-        for col in df.columns:
-            if 'source' in col.lower() or 'from' in col.lower():
-                source_col = col
-            if 'target' in col.lower() or 'to' in col.lower() or 'dest' in col.lower():
-                target_col = col
+        # 1순위: 정확한 컬럼명
+        if '사업자등록번호' in df.columns:
+            source_col = '사업자등록번호'
+        if '거래처사업자등록번호' in df.columns:
+            target_col = '거래처사업자등록번호'
+        
+        # 2순위: 부분 매칭
+        if source_col is None:
+            for col in df.columns:
+                if '사업자' in col and '번호' in col and '거래처' not in col:
+                    source_col = col
+                    break
+        
+        if target_col is None:
+            for col in df.columns:
+                if '거래처' in col and '사업자' in col and '번호' in col:
+                    target_col = col
+                    break
+        
+        # 3순위: 영문 컬럼명 (더미 데이터용)
+        if source_col is None or target_col is None:
+            for col in df.columns:
+                col_lower = col.lower()
+                if source_col is None and ('source' in col_lower or 'from' in col_lower):
+                    source_col = col
+                if target_col is None and ('target' in col_lower or 'to' in col_lower or 'dest' in col_lower):
+                    target_col = col
         
         # 컬럼이 없으면 첫 두 컬럼을 source/target으로 사용
         if source_col is None or target_col is None:
