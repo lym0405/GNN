@@ -6,16 +6,79 @@ Random + Historical Negative Sampling
 네거티브 샘플링 전략:
     1. Random Negative: 무작위 기업쌍 (기초 학습)
     2. Historical Negative: 과거 존재했던 거래 기업쌍 (디테일 학습)
+
+데이터 형식 참고:
+    - 사업자등록번호: 한국의 10자리 숫자 기업 식별번호 (예: 1234567890)
+    - 현재 데이터: 익명화된 형태 (예: firm_000000)로 저장됨
+    - 처리 방식: 모든 ID를 문자열로 통일하여 처리
 """
 
 import numpy as np
 import torch
 import pandas as pd
 from pathlib import Path
-from typing import Tuple, Set, List
+from typing import Tuple, Set, List, Optional
 import logging
+import re
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# 유틸리티 함수
+# ============================================================
+
+def validate_business_id(business_id: str) -> bool:
+    """
+    사업자등록번호 형식 검증
+    
+    Parameters
+    ----------
+    business_id : str
+        검증할 사업자등록번호
+    
+    Returns
+    -------
+    is_valid : bool
+        True: 실제 10자리 숫자 또는 익명화된 형태 (firm_XXXXXX)
+        False: 유효하지 않은 형식
+    """
+    # 10자리 숫자 (실제 사업자등록번호)
+    if re.match(r'^\d{10}$', business_id):
+        return True
+    
+    # 익명화된 형태 (firm_XXXXXX)
+    if re.match(r'^firm_\d+$', business_id):
+        return True
+    
+    return False
+
+
+def get_business_id_format(sample_ids: List[str]) -> str:
+    """
+    사업자등록번호의 형식을 판별
+    
+    Parameters
+    ----------
+    sample_ids : List[str]
+        샘플 ID 리스트
+    
+    Returns
+    -------
+    format_type : str
+        'real' (10자리 숫자), 'anonymized' (firm_XXXXXX), 'unknown'
+    """
+    if not sample_ids:
+        return 'unknown'
+    
+    sample = sample_ids[0]
+    
+    if re.match(r'^\d{10}$', sample):
+        return 'real'
+    elif re.match(r'^firm_\d+$', sample):
+        return 'anonymized'
+    else:
+        return 'unknown'
 
 
 class Phase3NegativeSampler:
@@ -91,6 +154,8 @@ class Phase3NegativeSampler:
         firm_to_idx_df = pd.read_csv(firm_to_idx_path)
         
         # 표준화된 컬럼명 사용: 사업자등록번호, idx
+        # 참고: 사업자등록번호는 실제로는 10자리 숫자 (예: 1234567890)
+        #       현재는 익명화된 형태 (예: firm_000000)로 저장됨
         if '사업자등록번호' not in firm_to_idx_df.columns or 'idx' not in firm_to_idx_df.columns:
             logger.warning(
                 f"⚠️  firm_to_idx 파일의 컬럼명이 올바르지 않습니다. "
@@ -98,10 +163,24 @@ class Phase3NegativeSampler:
             )
             return historical_set
         
+        # 사업자등록번호 → idx 매핑 생성
+        # dtype을 str로 명시적으로 변환 (10자리 숫자를 문자열로 읽을 경우 대비)
         firm_to_idx = dict(zip(
-            firm_to_idx_df['사업자등록번호'],
+            firm_to_idx_df['사업자등록번호'].astype(str),
             firm_to_idx_df['idx']
         ))
+        
+        # 데이터 형식 감지 및 로깅
+        sample_ids = list(firm_to_idx.keys())[:5]
+        id_format = get_business_id_format(sample_ids)
+        format_msg = {
+            'real': '실제 사업자등록번호 (10자리 숫자)',
+            'anonymized': '익명화된 형태 (firm_XXXXXX)',
+            'unknown': '알 수 없는 형식'
+        }
+        
+        logger.info(f"   ✓ Firm-to-Index 매핑: {len(firm_to_idx):,}개 기업")
+        logger.info(f"   ✓ ID 형식: {format_msg[id_format]} (예: {sample_ids[0]})")
         
         # 각 연도별 네트워크 로드
         for year_idx, (file_path, year) in enumerate(zip(network_files, years)):
@@ -137,9 +216,10 @@ class Phase3NegativeSampler:
                     continue
                 
                 # 인덱스 변환
+                # 사업자등록번호를 문자열로 변환 (10자리 숫자가 int로 읽힐 경우 대비)
                 for _, row in df.iterrows():
-                    src_firm = row[src_col]
-                    dst_firm = row[dst_col]
+                    src_firm = str(row[src_col])
+                    dst_firm = str(row[dst_col])
                     
                     if src_firm in firm_to_idx and dst_firm in firm_to_idx:
                         src_idx = firm_to_idx[src_firm]

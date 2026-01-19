@@ -5,6 +5,13 @@ import sys
 import torch
 import pandas as pd
 from pathlib import Path
+import logging
+
+# Set up logging to see all messages
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
