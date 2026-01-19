@@ -77,10 +77,9 @@ class HybridTrainer:
         """
         1 에폭 학습
         
-        [최적화] Curriculum Learning 적용:
-        - 초기: TGN만 학습 (빠른 수렴)
-        - 중반: GraphSEAL만 학습 (구조 패턴 학습)
-        - 후반: 결합 학습 (미세 조정)
+        [최적화] 
+        - Curriculum Learning 적용
+        - 리스트 → 텐서 변환 1회만 수행 (배치마다 반복 제거)
         
         Parameters
         ----------
@@ -108,19 +107,43 @@ class HybridTrainer:
             training_mode = 'hybrid'
             logger.info(f"  📚 Curriculum Learning: Hybrid (Epoch {self.current_epoch + 1})")
         
+        # [최적화] events가 리스트인 경우 한 번만 텐서로 변환 (배치마다 반복 X)
+        if isinstance(events, list) and len(events) > 0:
+            # events 구조 파악
+            first_event = events[0]
+            
+            # 각 필드별로 분리 (메모리 효율적)
+            all_timestamps = torch.tensor([e[0] for e in events], dtype=torch.long)
+            all_src_nodes = torch.tensor([e[1] for e in events], dtype=torch.long)
+            all_dst_nodes = torch.tensor([e[2] for e in events], dtype=torch.long)
+            all_labels = torch.tensor([e[4] for e in events], dtype=torch.float32)
+            
+            # edge_feat이 이미 텐서인지 확인
+            if isinstance(first_event[3], torch.Tensor):
+                all_edge_feats = torch.stack([e[3] for e in events])
+            else:
+                all_edge_feats = torch.tensor([e[3] for e in events], dtype=torch.float32)
+        else:
+            # 이미 텐서 형태로 전달된 경우 (향후 확장용)
+            all_timestamps = events[:, 0].long()
+            all_src_nodes = events[:, 1].long()
+            all_dst_nodes = events[:, 2].long()
+            all_edge_feats = events[:, 3:-1]
+            all_labels = events[:, -1].float()
+        
         total_loss = 0.0
         num_batches = 0
         
-        # 배치 단위로 처리
-        for i in range(0, len(events), batch_size):
-            batch_events = events[i:i+batch_size]
+        # 배치 단위로 처리 (이제 인덱싱만 수행)
+        for i in range(0, len(all_timestamps), batch_size):
+            # [최적화] 인덱싱만으로 배치 추출 (리스트 컴프리헨션 제거)
+            batch_slice = slice(i, i + batch_size)
             
-            # 배치 데이터 추출
-            timestamps = torch.tensor([e[0] for e in batch_events], dtype=torch.long)
-            src_nodes = torch.tensor([e[1] for e in batch_events], dtype=torch.long)
-            dst_nodes = torch.tensor([e[2] for e in batch_events], dtype=torch.long)
-            edge_feats = torch.stack([torch.tensor(e[3]) for e in batch_events])
-            labels = torch.tensor([e[4] for e in batch_events], dtype=torch.float32)
+            timestamps = all_timestamps[batch_slice]
+            src_nodes = all_src_nodes[batch_slice]
+            dst_nodes = all_dst_nodes[batch_slice]
+            edge_feats = all_edge_feats[batch_slice]
+            labels = all_labels[batch_slice]
             
             # GPU로 이동
             timestamps = timestamps.to(self.device)
@@ -233,6 +256,8 @@ class HybridTrainer:
         """
         평가 (Recall@K 중심)
         
+        [최적화] 리스트 → 텐서 변환 1회만 수행
+        
         Returns
         -------
         metrics : Dict
@@ -245,21 +270,36 @@ class HybridTrainer:
         """
         self.model.eval()
         
+        # [최적화] events가 리스트인 경우 한 번만 텐서로 변환
+        if isinstance(events, list) and len(events) > 0:
+            first_event = events[0]
+            
+            all_timestamps = torch.tensor([e[0] for e in events], dtype=torch.long)
+            all_src_nodes = torch.tensor([e[1] for e in events], dtype=torch.long)
+            all_dst_nodes = torch.tensor([e[2] for e in events], dtype=torch.long)
+            all_labels = torch.tensor([e[4] for e in events], dtype=torch.float32)
+            
+            # edge_feat은 평가 시 필요 없을 수 있음 (TGN 메모리 업데이트 안 함)
+        else:
+            all_timestamps = events[:, 0].long()
+            all_src_nodes = events[:, 1].long()
+            all_dst_nodes = events[:, 2].long()
+            all_labels = events[:, -1].float()
+        
         total_loss = 0.0
         num_batches = 0
         
         all_scores = []
-        all_labels = []
+        all_labels_list = []
         
-        # 배치 단위로 처리
-        for i in range(0, len(events), batch_size):
-            batch_events = events[i:i+batch_size]
+        # 배치 단위로 처리 (이제 인덱싱만 수행)
+        for i in range(0, len(all_timestamps), batch_size):
+            batch_slice = slice(i, i + batch_size)
             
-            # 배치 데이터 추출
-            timestamps = torch.tensor([e[0] for e in batch_events], dtype=torch.long)
-            src_nodes = torch.tensor([e[1] for e in batch_events], dtype=torch.long)
-            dst_nodes = torch.tensor([e[2] for e in batch_events], dtype=torch.long)
-            labels = torch.tensor([e[4] for e in batch_events], dtype=torch.float32)
+            timestamps = all_timestamps[batch_slice]
+            src_nodes = all_src_nodes[batch_slice]
+            dst_nodes = all_dst_nodes[batch_slice]
+            labels = all_labels[batch_slice]
             
             # GPU로 이동
             timestamps = timestamps.to(self.device)
@@ -300,17 +340,17 @@ class HybridTrainer:
             # 점수 저장
             scores = torch.sigmoid(logits)
             all_scores.append(scores.cpu().numpy())
-            all_labels.append(labels.cpu().numpy())
+            all_labels_list.append(labels.cpu().numpy())
         
         # 전체 데이터 결합
         all_scores = np.concatenate(all_scores)
-        all_labels = np.concatenate(all_labels)
+        all_labels_concat = np.concatenate(all_labels_list)
         
         # Recall@K 계산
         metrics = {'loss': total_loss / num_batches if num_batches > 0 else 0.0}
         
         for k in k_list:
-            recall_k = self._compute_recall_at_k(all_scores, all_labels, k)
+            recall_k = self._compute_recall_at_k(all_scores, all_labels_concat, k)
             metrics[f'recall@{k}'] = recall_k
         
         return metrics
