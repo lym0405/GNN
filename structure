@@ -1,5 +1,8 @@
 GNN/
 │
+├── CACHE_GUIDE.md              # 🆕 캐시 시스템 가이드
+├── clear_cache.py              # 🆕 캐시 삭제 유틸리티
+│
 ├── data/
 │   ├── raw/  # [원본 데이터] (절대 수정 금지)
 │   │   ├── posco_network_capital_consumergoods_removed_2020.csv
@@ -25,6 +28,13 @@ GNN/
 │   │   └── shock_after_P_v2.csv        # TIS 리스크 점수
 │   │   
 │   └── processed/  # [전처리 결과 및 모델 출력]
+│       ├── cache/              # 🆕 캐시 디렉토리 (자동 생성)
+│       │   ├── static_X_simple.npy      # Phase 2: 노드 피처 (73차원)
+│       │   ├── static_edge_index.pt     # Phase 2: 엣지 인덱스
+│       │   ├── static_edge_attr.pt      # Phase 2: 엣지 속성
+│       │   ├── static_firm_ids.pkl      # Phase 2: 기업 ID
+│       │   └── temporal_data.pkl        # Phase 3: 시계열 데이터 (~10-20분 → 5초)
+│       │
 │       ├── disentangled_recipes.pkl    # Phase 1: 기업별 생산함수 (33차원)
 │       │
 │       ├── X_feature_matrix.npy        # Phase 2: 피처 행렬 (N×197)
