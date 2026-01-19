@@ -68,16 +68,19 @@ class Phase3NegativeSampler:
         # 과거 네트워크 파일들 (2020-2023)
         # 실제 파일명: posco_network_capital_consumergoods_removed_{year}.csv
         network_files = []
+        years = []
         for year in [2020, 2021, 2022, 2023]:
             # 1순위: 긴 파일명
             long_name = self.data_dir / "raw" / f"posco_network_capital_consumergoods_removed_{year}.csv"
             if long_name.exists():
                 network_files.append(long_name)
+                years.append(year)
             else:
                 # 2순위: 짧은 파일명
                 short_name = self.data_dir / "raw" / f"posco_network_{year}.csv"
                 if short_name.exists():
                     network_files.append(short_name)
+                    years.append(year)
         
         # firm_to_idx 로드
         firm_to_idx_path = self.data_dir / "raw" / "firm_to_idx_model2.csv"
@@ -87,8 +90,13 @@ class Phase3NegativeSampler:
         
         firm_to_idx_df = pd.read_csv(firm_to_idx_path)
         
-        # 'Unnamed: 0', 'idx' 처리
-        if 'Unnamed: 0' in firm_to_idx_df.columns:
+        # 다양한 컬럼명 처리
+        if '사업자등록번호' in firm_to_idx_df.columns and 'idx' in firm_to_idx_df.columns:
+            firm_to_idx = dict(zip(
+                firm_to_idx_df['사업자등록번호'],
+                firm_to_idx_df['idx']
+            ))
+        elif 'Unnamed: 0' in firm_to_idx_df.columns:
             firm_to_idx = dict(zip(
                 firm_to_idx_df['Unnamed: 0'],
                 firm_to_idx_df['idx']
@@ -103,9 +111,11 @@ class Phase3NegativeSampler:
             return historical_set
         
         # 각 연도별 네트워크 로드
-        for year_idx, file_path in enumerate(network_files):
+        for year_idx, (file_path, year) in enumerate(zip(network_files, years)):
             if not file_path.exists():
                 continue
+            
+            prev_count = len(historical_set)
             
             try:
                 df = pd.read_csv(file_path)
@@ -146,7 +156,8 @@ class Phase3NegativeSampler:
                         if (src_idx, dst_idx) not in self.positive_set:
                             historical_set.add((src_idx, dst_idx))
                 
-                logger.info(f"   ✓ {2020 + year_idx}년: {len(historical_set):,}개 추가")
+                added_count = len(historical_set) - prev_count
+                logger.info(f"   ✓ {year}년: {added_count:,}개 추가 (누적: {len(historical_set):,}개)")
             
             except Exception as e:
                 logger.warning(f"⚠️  {file_path.name} 로드 실패: {e}")
