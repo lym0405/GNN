@@ -79,47 +79,37 @@ class SubgraphEncoder(nn.Module):
         device = node_emb.device
         batch_size = node_ids.shape[0]
         
-        # [최적화 1] PyG C++ 최적화 함수 사용 (100-1000x faster than Python BFS)
+        hop_features = []
+        
+        # [최적화] PyG C++ 함수로 hop별 서브그래프 추출 (Loop 내부 최적화)
         if USE_PYG_OPTIMIZATION:
-            # k-hop 서브그래프 추출 (C++ 최적화)
-            # node_ids 주변의 모든 노드를 한 번에 추출
-            subset, sub_edge_index, mapping, edge_mask = k_hop_subgraph(
-                node_idx=node_ids,
-                num_hops=self.num_hops,
-                edge_index=edge_index,
-                relabel_nodes=False,  # 원본 인덱스 유지 (임베딩 조회용)
-                flow='source_to_target',
-                num_nodes=node_emb.shape[0]
-            )
-            
-            # 서브그래프 노드들의 임베딩 추출
-            subgraph_emb = node_emb[subset]  # [num_subgraph_nodes, D]
-            
-            # [최적화 2] 각 hop별로 집계 (vectorized)
-            hop_features = []
-            
-            for k in range(self.num_hops):
-                # k-hop 거리의 노드들 임베딩 평균
-                # 단순화: 전체 서브그래프 평균 (실제로는 hop별 구분 가능)
-                aggregated = subgraph_emb.mean(dim=0, keepdim=True)  # [1, D]
+            for k, layer in enumerate(self.hop_layers):
+                # 1. k-hop 서브그래프 노드 추출 (C++ 최적화, 매우 빠름)
+                subset, _, _, _ = k_hop_subgraph(
+                    node_idx=node_ids,
+                    num_hops=k + 1,
+                    edge_index=edge_index,
+                    relabel_nodes=False,
+                    flow='source_to_target',
+                    num_nodes=node_emb.shape[0]
+                )
                 
-                # 변환
-                hop_feat = self.hop_layers[k](aggregated)  # [1, hidden_dim]
+                # 2. 추출된 노드들의 임베딩 가져오기 (벡터화)
+                if subset.numel() > 0:
+                    neighbor_emb = node_emb[subset]
+                    # Global Mean Pooling
+                    # 주의: 원래는 target node별로 pooling 해야 하지만,
+                    # 현재 구조(배치 전체 평균)를 유지하며 속도만 높임
+                    aggregated = neighbor_emb.mean(dim=0, keepdim=True)
+                else:
+                    aggregated = torch.zeros(1, node_emb.shape[1], device=device)
+                
+                # 3. 변환 및 저장
+                hop_feat = layer(aggregated)
                 hop_features.append(hop_feat)
-            
-            # 결합
-            combined = torch.cat(hop_features, dim=-1)  # [1, hidden_dim * num_hops]
-            
-            # 배치 크기에 맞게 확장
-            combined = combined.repeat(batch_size, 1)  # [B, hidden_dim * num_hops]
-            
-            # 최종 임베딩
-            subgraph_emb = self.output_layer(combined)  # [B, D]
-            
+        
         else:
             # Fallback: Python BFS (느림)
-            hop_features = []
-            
             for k, layer in enumerate(self.hop_layers):
                 # k-hop 이웃 찾기 (Python BFS - 느림)
                 neighbors = self._get_k_hop_neighbors(
@@ -136,13 +126,13 @@ class SubgraphEncoder(nn.Module):
                 # 변환
                 hop_feat = layer(aggregated)
                 hop_features.append(hop_feat)
-            
-            # 결합
-            combined = torch.cat(hop_features, dim=-1)
-            combined = combined.repeat(batch_size, 1)
-            
-            # 최종 임베딩
-            subgraph_emb = self.output_layer(combined)
+        
+        # 결합
+        combined = torch.cat(hop_features, dim=-1)  # [1, hidden_dim * num_hops]
+        combined = combined.repeat(batch_size, 1)  # [B, hidden_dim * num_hops]
+        
+        # 최종 임베딩
+        subgraph_emb = self.output_layer(combined)  # [B, D]
         
         return subgraph_emb
     

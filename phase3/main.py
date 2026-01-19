@@ -233,8 +233,7 @@ def main():
             memory_dim=config.TGN_MEMORY_DIM,
             time_dim=config.TGN_TIME_DIM,
             message_dim=config.TGN_MESSAGE_DIM,
-            embedding_dim=config.TGN_EMBEDDING_DIM,
-            max_neighbors=10  # [최적화] 이웃 샘플링 제한
+            embedding_dim=config.TGN_EMBEDDING_DIM
         )
         
         logger.info(f"✅ Track A (SC-TGN)")
