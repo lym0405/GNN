@@ -257,7 +257,7 @@ class SC_TGN(nn.Module):
         """
         배치 단위 메모리 업데이트
         
-        [최적화] Python Loop 제거 -> 벡터화된 집계 (10-100x 빠름)
+        [최적화] Python Loop 제거 -> 벡터 연산으로 일괄 처리 (10-100x 빠름)
         
         Parameters
         ----------
@@ -276,37 +276,43 @@ class SC_TGN(nn.Module):
             src_memory, dst_memory, edge_features, time_encoding
         )
         
-        # 2. [최적화] 노드별 메시지 집계 (Loop 제거!)
-        # src와 dst 노드를 합쳐서 한 번에 처리
+        # 2. [최적화] 메시지 집계 (Loop 제거)
+        # 소스/타겟 구분 없이 한 번에 처리
         all_nodes = torch.cat([src_nodes, dst_nodes])
-        all_messages = torch.cat([messages, messages])  # src, dst 모두에게 메시지 전달
-        all_timestamps = torch.cat([timestamps, timestamps])
+        all_messages = torch.cat([messages, messages])
         
-        # 유니크 노드와 역참조 인덱스 구하기
-        unique_nodes, inverse_indices = all_nodes.unique(return_inverse=True)
+        # 유니크 노드와 역참조 인덱스 추출
+        unique_nodes, inverse_indices = torch.unique(all_nodes, return_inverse=True)
         
-        # 메시지 평균 집계 (Pure PyTorch 벡터화)
-        # (노드별 메시지 합계 / 노드별 출현 횟수)
-        aggr_messages = torch.zeros(
-            unique_nodes.size(0), messages.size(1), 
-            device=messages.device, dtype=messages.dtype
-        )
+        n_unique = unique_nodes.size(0)
+        msg_dim = messages.size(1)
+        device = self.memory.memory.device
+        
+        # (1) 메시지 합계 계산 (index_add_ 사용)
+        aggr_messages = torch.zeros(n_unique, msg_dim, device=device)
         aggr_messages.index_add_(0, inverse_indices, all_messages)
         
-        counts = torch.zeros(unique_nodes.size(0), device=messages.device, dtype=torch.float32)
-        counts.index_add_(0, inverse_indices, torch.ones(inverse_indices.size(0), device=messages.device))
-        aggr_messages = aggr_messages / counts.unsqueeze(-1).clamp(min=1e-9)
+        # (2) 노드별 카운트 계산 (평균을 위해)
+        counts = torch.zeros(n_unique, 1, device=device)
+        ones = torch.ones(all_nodes.size(0), 1, device=device)
+        counts.index_add_(0, inverse_indices, ones)
         
-        # 3. 메모리 일괄 업데이트 (GRUCell은 배치를 지원함)
+        # (3) 평균 메시지
+        aggr_messages = aggr_messages / counts.clamp(min=1e-9)
+        
+        # 3. 메모리 일괄 업데이트 (Batch GRU)
         current_memory = self.memory.get_memory(unique_nodes)
         updated_memory = self.memory_updater(current_memory, aggr_messages)
         
-        # 시간 업데이트 (배치 내 가장 최신 시간으로)
-        # 정교하게 하려면 노드별 max 시간을 구해야 하지만, 
-        # TGN에서는 보통 배치 시간으로도 학습 잘 됨
-        batch_time = timestamps.max().repeat(len(unique_nodes))
+        # 4. 메모리 뱅크 갱신
+        # 시간은 배치의 최신 시간으로 일괄 갱신 (속도 우선)
+        batch_max_time = timestamps.max().expand(n_unique)
         
-        self.memory.update_memory(unique_nodes, updated_memory, batch_time)
+        self.memory.update_memory(
+            unique_nodes,
+            updated_memory,
+            batch_max_time
+        )
     
     def forward(
         self,
