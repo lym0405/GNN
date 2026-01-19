@@ -90,25 +90,18 @@ class Phase3NegativeSampler:
         
         firm_to_idx_df = pd.read_csv(firm_to_idx_path)
         
-        # 다양한 컬럼명 처리
-        if '사업자등록번호' in firm_to_idx_df.columns and 'idx' in firm_to_idx_df.columns:
-            firm_to_idx = dict(zip(
-                firm_to_idx_df['사업자등록번호'],
-                firm_to_idx_df['idx']
-            ))
-        elif 'Unnamed: 0' in firm_to_idx_df.columns:
-            firm_to_idx = dict(zip(
-                firm_to_idx_df['Unnamed: 0'],
-                firm_to_idx_df['idx']
-            ))
-        elif 'firm_id' in firm_to_idx_df.columns and 'idx' in firm_to_idx_df.columns:
-            firm_to_idx = dict(zip(
-                firm_to_idx_df['firm_id'],
-                firm_to_idx_df['idx']
-            ))
-        else:
-            logger.warning("⚠️  firm_to_idx 컬럼명 불일치")
+        # 표준화된 컬럼명 사용: 사업자등록번호, idx
+        if '사업자등록번호' not in firm_to_idx_df.columns or 'idx' not in firm_to_idx_df.columns:
+            logger.warning(
+                f"⚠️  firm_to_idx 파일의 컬럼명이 올바르지 않습니다. "
+                f"예상: ['사업자등록번호', 'idx'], 실제: {list(firm_to_idx_df.columns)}"
+            )
             return historical_set
+        
+        firm_to_idx = dict(zip(
+            firm_to_idx_df['사업자등록번호'],
+            firm_to_idx_df['idx']
+        ))
         
         # 각 연도별 네트워크 로드
         for year_idx, (file_path, year) in enumerate(zip(network_files, years)):
