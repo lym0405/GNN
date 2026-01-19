@@ -30,23 +30,144 @@ class RewiringOptimizer:
         충격완충력 계산기
     penalty_calculator : PenaltyCalculator
         패널티 계산기
+    firm_coords : Optional[np.ndarray]
+        기업 좌표 (N, 2) - 지리적 필터링용
+    firm_ksic : Optional[np.ndarray]
+        기업 KSIC 코드 (N,) - 산업 필터링용
+    max_distance_km : float
+        최대 거리 (km) - 이 거리 이상은 후보에서 제외
     """
     
     def __init__(
         self,
         link_probs: np.ndarray,
         buffer_calculator: BufferCalculator,
-        penalty_calculator: PenaltyCalculator
+        penalty_calculator: PenaltyCalculator,
+        firm_coords: Optional[np.ndarray] = None,
+        firm_ksic: Optional[np.ndarray] = None,
+        max_distance_km: float = 500.0
     ):
         self.link_probs = link_probs
         self.buffer_calc = buffer_calculator
         self.penalty_calc = penalty_calculator
+        self.firm_coords = firm_coords
+        self.firm_ksic = firm_ksic
+        self.max_distance_km = max_distance_km
         
         self.num_nodes = link_probs.shape[0]
+        
+        # [최적화 2] 후보 필터링: Candidate Pool 미리 생성
+        self.candidate_pool = self._build_candidate_pool()
         
         logger.info("RewiringOptimizer 초기화")
         logger.info(f"  - 노드 수: {self.num_nodes:,}")
         logger.info(f"  - 링크 확률 범위: [{np.min(link_probs):.4f}, {np.max(link_probs):.4f}]")
+        if self.candidate_pool is not None:
+            avg_candidates = np.mean([len(v) for v in self.candidate_pool.values()])
+            logger.info(f"  - 평균 후보 수/노드: {avg_candidates:.1f} (필터링 적용)")
+    
+    def _build_candidate_pool(self) -> Optional[Dict[int, List[int]]]:
+        """
+        [최적화 2] 후보 풀 미리 구축 (Pruning)
+        
+        모든 가능한 엣지 (N × N)를 검토하지 않고,
+        - 거리 기반: 지리적으로 너무 먼 기업 제외
+        - 산업 코드 기반: 연관성 없는 산업 간 연결 제외
+        
+        Returns
+        -------
+        candidate_pool : Dict[int, List[int]]
+            각 노드별 가능한 후보 리스트
+        """
+        if self.firm_coords is None and self.firm_ksic is None:
+            logger.info("  ⚠️  좌표/KSIC 정보 없음, 후보 필터링 스킵")
+            return None
+        
+        logger.info("🔍 후보 풀 구축 시작 (Pruning)")
+        
+        candidate_pool = {}
+        
+        for src_node in range(self.num_nodes):
+            candidates = []
+            
+            for tgt_node in range(self.num_nodes):
+                if src_node == tgt_node:
+                    continue
+                
+                # 거리 필터링
+                if self.firm_coords is not None:
+                    distance = self._calculate_distance(
+                        self.firm_coords[src_node],
+                        self.firm_coords[tgt_node]
+                    )
+                    if distance > self.max_distance_km:
+                        continue
+                
+                # 산업 코드 필터링 (KSIC 앞 1자리 또는 2자리 일치)
+                if self.firm_ksic is not None:
+                    if not self._is_industry_compatible(
+                        self.firm_ksic[src_node],
+                        self.firm_ksic[tgt_node]
+                    ):
+                        continue
+                
+                candidates.append(tgt_node)
+            
+            candidate_pool[src_node] = candidates
+            
+            if (src_node + 1) % 10000 == 0:
+                logger.info(f"  진행: {src_node+1:,}/{self.num_nodes:,}")
+        
+        # 통계
+        total_candidates = sum(len(v) for v in candidate_pool.values())
+        total_possible = self.num_nodes * (self.num_nodes - 1)
+        reduction = (1 - total_candidates / total_possible) * 100
+        
+        logger.info(f"✅ 후보 풀 구축 완료")
+        logger.info(f"  - 전체 가능: {total_possible:,}")
+        logger.info(f"  - 필터링 후: {total_candidates:,}")
+        logger.info(f"  - 감소율: {reduction:.1f}%")
+        
+        return candidate_pool
+    
+    def _calculate_distance(self, coord1: np.ndarray, coord2: np.ndarray) -> float:
+        """
+        두 좌표 간 거리 계산 (km)
+        
+        간단한 유클리드 거리 (실제로는 Haversine 공식 사용 권장)
+        """
+        # 위도/경도를 km로 대략 변환
+        # 1도 ≈ 111km (위도), 1도 ≈ 88km (경도, 한국 기준)
+        lat_km = (coord1[1] - coord2[1]) * 111
+        lon_km = (coord1[0] - coord2[0]) * 88
+        distance = np.sqrt(lat_km**2 + lon_km**2)
+        return distance
+    
+    def _is_industry_compatible(self, ksic1: str, ksic2: str) -> bool:
+        """
+        산업 코드 호환성 체크
+        
+        KSIC 코드 앞 1-2자리가 일치하면 호환 가능
+        예: C24 (금속) ↔ C25 (금속가공) = 호환 O
+             C24 (금속) ↔ G47 (소매) = 호환 X
+        """
+        if ksic1 is None or ksic2 is None:
+            return True
+        
+        ksic1_str = str(ksic1)
+        ksic2_str = str(ksic2)
+        
+        # 앞 1자리 일치 (대분류)
+        if len(ksic1_str) > 0 and len(ksic2_str) > 0:
+            if ksic1_str[0] == ksic2_str[0]:
+                return True
+        
+        # 또는 앞 2자리 일치 (중분류)
+        if len(ksic1_str) >= 2 and len(ksic2_str) >= 2:
+            if ksic1_str[:2] == ksic2_str[:2]:
+                return True
+        
+        return False
     
     def optimize_rewiring(
         self,
@@ -166,6 +287,13 @@ class RewiringOptimizer:
         top_k_indices = np.argpartition(valid_probs, -top_k_local)[-top_k_local:]
         
         candidates = valid_indices[top_k_indices]
+        
+        # [최적화 2] 후보 필터링: Candidate Pool 사용
+        if self.candidate_pool is not None:
+            candidates = [
+                tgt for tgt in candidates
+                if tgt in self.candidate_pool[src_node]
+            ]
         
         return candidates
     
@@ -355,3 +483,100 @@ class RewiringOptimizer:
         logger.info(f"  - 평균 레시피 유사도: {metrics['avg_recipe_similarity']:.4f}")
         
         return metrics
+    
+    def evaluate_move_delta(
+        self, 
+        current_graph_risk: float,
+        u: int, 
+        v: int, 
+        action: str = 'add'
+    ) -> float:
+        """
+        국소적 리스크 변화 평가 (Delta Calculation)
+        
+        [최적화] 전체 그래프 복사 및 재계산 대신 변경된 부분만 계산
+        - Before: O(N) - 전체 노드 리스크 재계산
+        - After: O(degree(u) + degree(v)) - 국소 변화만 계산
+        
+        Parameters
+        ----------
+        current_graph_risk : float
+            현재 전체 그래프 리스크
+        u : int
+            소스 노드
+        v : int
+            타겟 노드
+        action : str
+            'add' or 'remove'
+        
+        Returns
+        -------
+        new_total_risk : float
+            새로운 전체 리스크 (근사값)
+        
+        Notes
+        -----
+        Delta 방식:
+        1. u와 v의 degree 변화 계산
+        2. u, v 주변 노드들의 risk 변화만 계산
+        3. 전체 risk = 기존 risk + delta_risk
+        
+        정확도 vs. 속도 트레이드오프:
+        - 완전히 정확하지는 않지만 충분히 좋은 근사
+        - 대규모 그래프에서 극적인 속도 향상
+        """
+        # [비효율] 전체 그래프 복사 -> 변경 -> 전체 시뮬레이션
+        # temp_graph = current_graph.clone()
+        # if action == 'add':
+        #     temp_graph.add_edge(u, v)
+        # else:
+        #     temp_graph.remove_edge(u, v)
+        # return self.calculate_total_risk(temp_graph)  # O(N) - 전체 재계산
+        
+        # [최적화] 국소적 변화만 계산 (Approximate Delta)
+        delta_risk = self._calculate_local_risk_change(u, v, action)
+        
+        return current_graph_risk + delta_risk
+    
+    def _calculate_local_risk_change(
+        self, 
+        u: int, 
+        v: int, 
+        action: str
+    ) -> float:
+        """
+        u-v 엣지 추가/제거로 인한 국소 리스크 변화 계산
+        
+        Parameters
+        ----------
+        u, v : int
+            노드 인덱스
+        action : str
+            'add' or 'remove'
+        
+        Returns
+        -------
+        delta_risk : float
+            리스크 변화량
+        """
+        # 1. u와 v의 degree 변화로 인한 직접적 영향
+        sign = 1 if action == 'add' else -1
+        
+        # Buffer calculator에서 TIS 점수 가져오기
+        buffer_scores = self.buffer_calc.compute_buffer()
+        tis_u = 1.0 / (buffer_scores[u] + 1e-6)  # TIS ∝ 1/Buffer
+        tis_v = 1.0 / (buffer_scores[v] + 1e-6)
+        
+        # Degree 변화: +1 or -1
+        # Risk는 보통 degree와 TIS의 함수
+        # 간단한 모델: risk_change ≈ TIS × degree_change
+        delta_u = sign * tis_u * 0.1  # 가중치 조정 가능
+        delta_v = sign * tis_v * 0.1
+        
+        # 2. 주변 노드에 미치는 영향 (선택적)
+        # 실제로는 u, v의 이웃들도 영향을 받지만
+        # 단순화를 위해 직접 영향만 고려
+        
+        delta_risk = delta_u + delta_v
+        
+        return delta_risk

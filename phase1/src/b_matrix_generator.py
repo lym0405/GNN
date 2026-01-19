@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import scipy.sparse as sp
+from scipy import sparse
 import os
 
 class BMatrixGenerator:
@@ -166,3 +167,51 @@ class BMatrixGenerator:
             h_vec = h_vec * share
 
         return (self.alpha * h_vec) + ((1 - self.alpha) * r_vec)
+    
+    def generate_b_matrix_sparse(self, transaction_pairs, num_firms=None):
+        """
+        B 행렬을 Sparse Matrix로 효율적으로 생성
+        
+        [최적화] Dense Matrix 대신 Sparse Matrix (COO/CSR) 직접 생성
+        - 메모리 효율: N x N dense → nnz triplets만 저장
+        - 생성 속도: O(N²) → O(nnz)
+        
+        Parameters
+        ----------
+        transaction_pairs : list of tuple
+            [(src_idx, dst_idx), ...] 거래 쌍
+        num_firms : int, optional
+            전체 기업 수 (없으면 자동 계산)
+        
+        Returns
+        -------
+        sparse_matrix : scipy.sparse.csr_matrix
+            B 행렬 (sparse)
+        """
+        if num_firms is None:
+            # transaction_pairs에서 최대 인덱스 찾기
+            if len(transaction_pairs) == 0:
+                num_firms = 0
+            else:
+                num_firms = max(
+                    max(pair[0] for pair in transaction_pairs),
+                    max(pair[1] for pair in transaction_pairs)
+                ) + 1
+        
+        # [최적화] Sparse Matrix (COO/CSR) 직접 생성
+        # Dense: np.zeros((num_firms, num_firms)) → 메모리 낭비
+        # Sparse: triplet (row, col, data)만 저장
+        rows = [pair[0] for pair in transaction_pairs]
+        cols = [pair[1] for pair in transaction_pairs]
+        data = np.ones(len(rows))
+        
+        # COO → CSR 변환 (빠른 행 접근)
+        sparse_matrix = sparse.coo_matrix(
+            (data, (rows, cols)), 
+            shape=(num_firms, num_firms)
+        ).tocsr()
+        
+        print(f"   ✓ Sparse B Matrix 생성: {num_firms:,} × {num_firms:,}")
+        print(f"   ✓ 비영 원소: {len(data):,} ({len(data)/(num_firms**2)*100:.4f}%)")
+        
+        return sparse_matrix

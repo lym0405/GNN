@@ -120,12 +120,28 @@ class Phase3NegativeSampler:
     
     def _load_historical_negatives(self) -> Set[Tuple[int, int]]:
         """
-        과거 연도의 엣지를 Historical Negatives로 로드
+        과거 연도의 엣지를 Historical Negatives로 로드 (캐싱 지원)
         
         Returns
         -------
         historical_negatives : Set[Tuple[int, int]]
         """
+        # [최적화] 캐시 경로 설정
+        cache_path = self.data_dir / "processed" / "cache" / "historical_negatives_phase3.pkl"
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # 캐시가 있으면 로드
+        if cache_path.exists():
+            try:
+                import pickle
+                with open(cache_path, 'rb') as f:
+                    historical_set = pickle.load(f)
+                logger.info(f"📦 Historical Negatives 캐시 로드: {len(historical_set):,}개")
+                return historical_set
+            except Exception as e:
+                logger.warning(f"⚠️  캐시 로드 실패: {e}, 재생성합니다")
+        
+        # 캐시 없으면 CSV에서 로드
         historical_set = set()
         
         # 과거 네트워크 파일들 (2020-2023)
@@ -235,6 +251,15 @@ class Phase3NegativeSampler:
             except Exception as e:
                 logger.warning(f"⚠️  {file_path.name} 로드 실패: {e}")
         
+        # [최적화] 캐시 저장
+        try:
+            import pickle
+            with open(cache_path, 'wb') as f:
+                pickle.dump(historical_set, f)
+            logger.info(f"💾 Historical Negatives 캐시 저장: {cache_path}")
+        except Exception as e:
+            logger.warning(f"⚠️  캐시 저장 실패: {e}")
+        
         return historical_set
     
     def sample_negatives(
@@ -244,7 +269,7 @@ class Phase3NegativeSampler:
         seed: int = 42
     ) -> torch.Tensor:
         """
-        네거티브 엣지 샘플링 (Random + Historical)
+        벡터화된 네거티브 샘플링 (속도 최적화 적용)
         
         Parameters
         ----------
@@ -253,6 +278,7 @@ class Phase3NegativeSampler:
         historical_ratio : float
             Historical Negatives 비율 (0.0~1.0)
         seed : int
+            랜덤 시드
         
         Returns
         -------
@@ -265,47 +291,73 @@ class Phase3NegativeSampler:
         
         negatives = []
         
-        # 1. Historical Negatives
+        # 1. Historical Negatives (기존 로직 유지)
         if num_historical > 0 and len(self.historical_negatives) > 0:
             historical_list = list(self.historical_negatives)
             if len(historical_list) >= num_historical:
-                sampled = np.random.choice(
+                sampled_indices = np.random.choice(
                     len(historical_list),
                     size=num_historical,
                     replace=False
                 )
-                negatives.extend([historical_list[i] for i in sampled])
+                negatives.extend([historical_list[i] for i in sampled_indices])
             else:
-                # 부족하면 전부 사용
+                # 부족하면 전부 사용하고 random 증가
                 negatives.extend(historical_list)
                 num_random += (num_historical - len(historical_list))
         else:
             # Historical 없으면 Random으로 대체
             num_random += num_historical
         
-        # 2. Random Negatives
+        # 2. Random Negatives [최적화: 벡터화]
         if num_random > 0:
-            attempts = 0
-            max_attempts = num_random * 10
+            # Set으로 변환하여 조회 속도 향상
+            existing_negatives = set(negatives)
             
-            while len(negatives) < num_samples and attempts < max_attempts:
-                src = np.random.randint(0, self.num_nodes)
-                dst = np.random.randint(0, self.num_nodes)
+            # 한 번에 1.5배수 생성
+            multiplier = 1.5
+            needed = num_random
+            max_iterations = 100
+            iteration = 0
+            
+            while len(negatives) < num_samples and iteration < max_iterations:
+                iteration += 1
+                n_gen = int(needed * multiplier)
                 
-                # Self-loop 제거 & Positive 제거 & 중복 제거
-                if (src != dst and 
-                    (src, dst) not in self.positive_set and
-                    (src, dst) not in negatives):
-                    negatives.append((src, dst))
+                # [최적화 1] 벡터화된 난수 생성
+                src = np.random.randint(0, self.num_nodes, size=n_gen)
+                dst = np.random.randint(0, self.num_nodes, size=n_gen)
                 
-                attempts += 1
+                # [최적화 2] 벡터 연산으로 Self-loop 제거
+                mask = (src != dst)
+                src, dst = src[mask], dst[mask]
+                
+                # [최적화 3] Positive & 중복 필터링
+                valid_pairs = []
+                for s, d in zip(src, dst):
+                    if ((s, d) not in self.positive_set and 
+                        (s, d) not in existing_negatives):
+                        valid_pairs.append((s, d))
+                        existing_negatives.add((s, d))
+                        if len(valid_pairs) >= needed:
+                            break
+                
+                negatives.extend(valid_pairs)
+                needed = num_samples - len(negatives)
+                
+                if needed <= 0:
+                    break
+                
+                # 부족하면 다음엔 더 많이 생성
+                multiplier = min(multiplier * 1.2, 5.0)
+            
+            if len(negatives) < num_samples:
+                logger.warning(
+                    f"⚠️  Random negative 샘플링 부족: "
+                    f"{len(negatives)}/{num_samples}"
+                )
         
         # Tensor 변환
-        if len(negatives) < num_samples:
-            logger.warning(
-                f"⚠️  요청된 {num_samples}개 중 {len(negatives)}개만 샘플링됨"
-            )
-        
         negative_edges = torch.tensor(
             negatives[:num_samples],
             dtype=torch.long

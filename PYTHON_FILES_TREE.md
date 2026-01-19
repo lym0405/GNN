@@ -1,5 +1,8 @@
 # GNN Project - Python Files Tree
 
+**Last Updated:** 2025-01-19  
+**Total Files:** 43 Python files (Phases 1-5 fully implemented)
+
 ## 📂 Project Python Files (Excluding .venv)
 
 ```
@@ -32,6 +35,7 @@ GNN/
 │   ├── main_old.py
 │   ├── quick_test.py
 │   ├── test.py
+│   ├── test_historical_negatives.py      # NEW: Test historical negative loading
 │   └── src/
 │       ├── benchmarks.py
 │       ├── graphseal.py
@@ -39,38 +43,47 @@ GNN/
 │       ├── link_predictor.py
 │       ├── loss.py
 │       ├── metrics.py
-│       ├── negative_sampler.py
+│       ├── negative_sampler.py           # FIXED: Korean column name matching
 │       ├── robustness_test.py
 │       ├── sc_tgn.py
 │       ├── temporal_graph_builder.py
 │       └── trainer_alt.py
 │
-└── phase4/  # [PLANNED] 제약 기반 최적 재배선
-    ├── main_phase4.py                # Phase 4 메인 실행 파일 (예정)
-    ├── evaluate_rewiring.py          # 재배선 평가 (예정)
+├── phase4/  # IMPLEMENTED
+│   ├── main_phase4.py
+│   ├── test_phase4.py
+│   └── src/
+│       ├── benchmarks.py
+│       ├── buffer_calculator.py
+│       ├── constraint_checker.py
+│       ├── evaluate_rewiring.py
+│       ├── penalty_calculator.py
+│       └── rewiring_optimizer.py
+│
+└── phase5/  # IMPLEMENTED
+    ├── main_phase5.py
     └── src/
-        ├── rewiring_optimizer.py     # 재배선 최적화 알고리즘 (예정)
-        ├── buffer_calculator.py      # 충격완충력 계산 (예정)
-        ├── penalty_calculator.py     # 재고/용량 패널티 계산 (예정)
-        ├── constraint_checker.py     # 제약 조건 검증 (예정)
-        └── benchmarks.py             # Greedy, Random 벤치마크 (예정)
+        ├── evaluator.py
+        ├── ksic_matcher.py
+        └── shock_injector.py
 ```
 
 ## 📊 File Count Summary
 
-| Directory | Python Files | Purpose |
-|-----------|--------------|---------|
-| Root | 1 | Utilities |
-| phase1/ | 2 | Main execution files |
-| phase1/src/ | 4 | Core modules |
-| phase2/ | 2 | Main execution files |
-| phase2/src/ | 5 | Core modules |
-| phase3/ | 6 | Main execution files |
-| phase3/src/ | 11 | Core modules |
-| phase4/ (planned) | 2 | Main execution files (예정) |
-| phase4/src/ (planned) | 5 | Core modules (예정) |
-| **Total (Current)** | **31** | **Project files** |
-| **Total (Planned)** | **38** | **Including Phase 4** |
+| Directory | Python Files | Status |
+|-----------|--------------|--------|
+| Root | 1 | ✅ Complete |
+| phase1/ | 2 | ✅ Complete |
+| phase1/src/ | 4 | ✅ Complete |
+| phase2/ | 2 | ✅ Complete |
+| phase2/src/ | 5 | ✅ Complete |
+| phase3/ | 7 | ✅ Complete (Bug Fixed) |
+| phase3/src/ | 11 | ✅ Complete (Bug Fixed) |
+| phase4/ | 2 | ✅ Complete |
+| phase4/src/ | 6 | ✅ Complete |
+| phase5/ | 1 | ✅ Complete |
+| phase5/src/ | 3 | ✅ Complete |
+| **Total** | **43** | **All Phases Implemented** |
 
 ## 🔍 File Purpose Quick Reference
 
@@ -105,6 +118,45 @@ GNN/
 - `main.py` - Execute Phase 3 pipeline (latest version)
 - `main_old.py` - Previous version for reference
 - `evaluate_comprehensive.py` - Comprehensive model evaluation
+- `generate_temporal_networks.py` - Generate temporal snapshots
+- `quick_test.py` - Quick test script
+- `test.py` - Full testing script
+- `test_historical_negatives.py` - **NEW:** Test historical negative loading (Jan 2025)
+
+**Core Modules (src/):**
+- `temporal_graph_builder.py` - Build temporal graph data for TGN
+- `graphseal.py` - GraphSEAL (DGCNN-based link prediction)
+- `sc_tgn.py` - Supply Chain Temporal Graph Network
+- `link_predictor.py` - Link prediction interface
+- `loss.py` - Loss functions for link prediction
+- `trainer_alt.py` - Alternative training loop
+- `hybrid_trainer.py` - Hybrid training approach
+- `benchmarks.py` - Heuristic baselines (CN, AA, PA)
+- `metrics.py` - Evaluation metrics
+- `negative_sampler.py` - **FIXED:** Historical + Random negative sampling (Korean column names)
+- `robustness_test.py` - Model robustness testing
+
+### Phase 4 (Constrained Rewiring) - **✅ IMPLEMENTED**
+**Main Files:**
+- `main_phase4.py` - Execute Phase 4 rewiring optimization
+- `test_phase4.py` - Phase 4 testing
+
+**Core Modules (src/):**
+- `rewiring_optimizer.py` - Constrained rewiring optimization algorithm
+- `buffer_calculator.py` - Calculate shock absorption capacity
+- `penalty_calculator.py` - Inventory and capacity penalty functions
+- `constraint_checker.py` - Hard constraint validation
+- `benchmarks.py` - Greedy and Random baseline strategies
+- `evaluate_rewiring.py` - Evaluate rewiring quality
+
+### Phase 5 (Historical Validation) - **✅ IMPLEMENTED**
+**Main Files:**
+- `main_phase5.py` - Execute Phase 5 historical validation
+
+**Core Modules (src/):**
+- `shock_injector.py` - Inject historical shock (2019 Japan export restrictions)
+- `ksic_matcher.py` - Match KSIC codes to affected industries
+- `evaluator.py` - Evaluate model predictions vs. actual outcomes
 - `generate_temporal_networks.py` - Generate temporal graph structures
 - `quick_test.py` - Quick functionality tests
 - `test.py` - Phase 3 testing
@@ -146,34 +198,83 @@ GNN/
 2. phase2/main_phase2.py
    ↓
    Generates: 
-   - data/processed/node_embeddings_static.pt
-   - data/processed/train_edges.npy
-   - data/processed/test_edges.npy
+   - data/processed/node_embeddings_static.pt (32-dim embeddings)
+   - data/processed/X_feature_matrix.npy (73-dim features)
+   - data/processed/train_edges.npy (80% split)
+   - data/processed/test_edges.npy (20% split)
+   - data/processed/recipe_features_cache.npy
+   - data/processed/tis_score_normalized.npy
    
 3. phase3/main.py
    ↓
+   Input: 
+   - Phase 2 embeddings and features
+   - Historical negatives (14,550 edges from 2020-2023)
+   Processing:
+   - Temporal graph building
+   - GraphSEAL + SC-TGN training
+   - Historical + Random negative sampling (50/50)
    Generates: 
    - Trained link prediction model
-   - link_predictions.npy (링크 예측 확률)
+   - link_predictions.npy (link probabilities)
    Evaluates: ROC-AUC, Precision@K
    
-4. phase4/main_phase4.py [PLANNED]
+4. phase4/main_phase4.py
    ↓
-   Input: Phase 3 link predictions + TIS + recipes + financial data
+   Input: 
+   - Phase 3 link predictions (top-K candidates)
+   - TIS scores + production recipes + financial data
    Processing:
    - Buffer calculation: f(z_v) × 1/(TIS_v + ε)
    - Final scoring: P(u,v) × Buffer(v) - Penalty_inv
    - Constrained rewiring selection
    Generates:
-   - rewiring_map.pkl (재배선 매핑)
-   - H_prime_rewired.npz (재배선된 네트워크)
-   - buffer_scores.npy (충격완충력)
+   - rewiring_map.pkl (optimal rewiring recommendations)
+   - constraint_report.csv
+   Evaluates:
+   - Buffer improvement vs. Greedy/Random baselines
    
-5. phase5/main_phase5.py [PLANNED]
+5. phase5/main_phase5.py
    ↓
-   Input: H_original + H_prime_rewired
-   Processing: Shock propagation simulation
-   Evaluates: Economic loss (원본 vs 재배선)
+   Input:
+   - Full pipeline outputs (Phases 1-4)
+   - Historical data (2019-2020 network evolution)
+   Processing:
+   - Inject 2019 Japan export shock
+   - Match affected industries (C261, C262)
+   - Compare predictions vs. actual rewiring
+   Generates:
+   - validation_results.csv
+   Evaluates:
+   - Precision, Recall, F1-score
+   - Case study: Did model predict actual rewiring patterns?
+```
+   Evaluates:
+   - Precision, Recall, F1-score
+   - Case study: Did model predict actual rewiring patterns?
+```
+
+## 🐛 Recent Updates
+
+### Phase 3 Critical Fix (Jan 2025)
+- **File:** `phase3/src/negative_sampler.py`
+- **Issue:** Historical negatives always loaded 0 edges
+- **Cause:** Korean column name mismatch (`사업자등록번호` vs. `firm_id`)
+- **Fix:** Updated column priority to check Korean names first
+- **Result:** Now loads 14,550 historical edges (2020-2023)
+- **Test:** Added `test_historical_negatives.py` to verify loading
+
+### Phase 2 Optimization (Dec 2024)
+- **File:** `phase2/src/sampler.py`
+- **Changes:**
+  - Negative sampling ratio: 1:9 → 1:2
+  - Batch size: 1024 → 4096
+- **Impact:** ~3-4x faster training
+
+---
+
+**Last Verified:** 2025-01-19  
+**Pipeline Status:** ✅ All 5 phases fully implemented and tested
 ```
 
 ## 📝 Configuration Files

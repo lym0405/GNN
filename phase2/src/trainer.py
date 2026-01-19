@@ -54,10 +54,16 @@ class CurriculumTrainer:
         pos_edges: torch.Tensor,
         neg_edges: torch.Tensor,
         tis_scores: Optional[torch.Tensor] = None,
-        batch_size: int = 1024
+        batch_size: int = 4096  # 배치 크기 증가 (1024 → 4096)
     ) -> dict:
         """
-        1 에폭 학습
+        1 에폭 학습 (최적화 버전)
+        
+        최적화 전략:
+        1. Forward Pass는 에폭당 1회만 수행 (embeddings 재사용)
+        2. Loss 계산만 배치별로 수행
+        3. Backward는 retain_graph=True로 그래프 유지
+        4. Weight Update는 에폭당 1회
         
         Parameters
         ----------
@@ -72,7 +78,7 @@ class CurriculumTrainer:
         tis_scores : torch.Tensor, shape (N,), optional
             노드별 TIS 점수
         batch_size : int
-            배치 크기
+            배치 크기 (4096 권장)
         
         Returns
         -------
@@ -92,6 +98,10 @@ class CurriculumTrainer:
         if tis_scores is not None:
             tis_scores = tis_scores.to(self.device)
         
+        # [최적화 1] Forward Pass는 에폭당 단 1회만 수행
+        self.optimizer.zero_grad()
+        embeddings = self.model(x, edge_index)
+        
         total_loss = 0
         num_batches = 0
         all_pos_scores = []
@@ -104,6 +114,7 @@ class CurriculumTrainer:
         indices = np.arange(max(num_pos, num_neg))
         np.random.shuffle(indices)
         
+        # [최적화 2] 배치 루프는 오직 Loss 계산용으로만 사용
         for start in range(0, len(indices), batch_size):
             end = min(start + batch_size, len(indices))
             batch_indices = indices[start:end]
@@ -116,14 +127,8 @@ class CurriculumTrainer:
             neg_batch_idx = batch_indices % num_neg
             neg_batch = neg_edges[:, neg_batch_idx]
             
-            # Forward pass (전체 그래프로 임베딩 생성)
-            self.optimizer.zero_grad()
-            embeddings = self.model(x, edge_index)
-            
-            # Positive 예측
+            # [수정] 미리 계산된 embeddings 사용 (재계산 X)
             pos_pred = self.model.predict_link(embeddings, pos_batch)
-            
-            # Negative 예측
             neg_pred = self.model.predict_link(embeddings, neg_batch)
             
             # 레이블 생성
@@ -145,15 +150,21 @@ class CurriculumTrainer:
             # 손실 계산
             loss = self.loss_fn(pred, labels, batch_tis)
             
-            # Backward
-            loss.backward()
-            self.optimizer.step()
+            # [최적화 3] Backward 호출 시 retain_graph=True 사용
+            # 마지막 배치가 아닐 경우 그래프 유지 필요 (embeddings가 계속 쓰이므로)
+            is_last_batch = (end >= len(indices))
+            loss.backward(retain_graph=not is_last_batch)
             
             # 통계
             total_loss += loss.item()
             num_batches += 1
+            
+            # CPU 이동은 최소화하거나 로깅용으로만
             all_pos_scores.append(pos_pred.detach().cpu().numpy())
             all_neg_scores.append(neg_pred.detach().cpu().numpy())
+        
+        # [최적화 4] Weight Update는 에폭당 1회 수행
+        self.optimizer.step()
         
         # 평균 계산
         avg_loss = total_loss / num_batches

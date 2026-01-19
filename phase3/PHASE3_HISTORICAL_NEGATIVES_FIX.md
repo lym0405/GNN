@@ -8,7 +8,7 @@ The Phase 3 training was showing "Historical Negatives: 0" in the logs, meaning 
 
 The issue was in the column name matching logic in `phase3/src/negative_sampler.py`:
 
-1. **Actual data structure:**
+1. **Actual data structure (after standardization):**
    - `firm_to_idx_model2.csv` has columns: `사업자등록번호` (firm ID) and `idx` (index)
    - Network files have columns: `사업자등록번호` (source) and `거래처사업자등록번호` (destination)
 
@@ -22,25 +22,29 @@ The issue was in the column name matching logic in `phase3/src/negative_sampler.
    - Historical negative loading failed silently
    - Returned empty set → "Historical Negatives: 0"
 
+**Note:** The `firm_to_idx_model2.csv` file has been standardized to use `사업자등록번호` and `idx` columns for consistency.
+
 ## Solution
 
-### 1. Fixed Column Name Priority
-Updated the column name matching logic to prioritize the actual Korean column names:
+### 1. Standardized Column Names and Simplified Logic
+After standardizing the `firm_to_idx_model2.csv` file to use consistent Korean column names, the code now uses a simple, direct approach:
 
 ```python
-# Priority 1: Korean column names (actual data)
-if '사업자등록번호' in firm_to_idx_df.columns and 'idx' in firm_to_idx_df.columns:
-    firm_to_idx = dict(zip(
-        firm_to_idx_df['사업자등록번호'],
-        firm_to_idx_df['idx']
-    ))
-# Priority 2: Unnamed columns (fallback)
-elif 'Unnamed: 0' in firm_to_idx_df.columns:
-    ...
-# Priority 3: English column names (fallback)
-elif 'firm_id' in firm_to_idx_df.columns:
-    ...
+# 표준화된 컬럼명 사용: 사업자등록번호, idx
+if '사업자등록번호' not in firm_to_idx_df.columns or 'idx' not in firm_to_idx_df.columns:
+    logger.warning(
+        f"⚠️  firm_to_idx 파일의 컬럼명이 올바르지 않습니다. "
+        f"예상: ['사업자등록번호', 'idx'], 실제: {list(firm_to_idx_df.columns)}"
+    )
+    return historical_set
+
+firm_to_idx = dict(zip(
+    firm_to_idx_df['사업자등록번호'],
+    firm_to_idx_df['idx']
+))
 ```
+
+This is much cleaner and more maintainable than the previous cascading if-elif chain.
 
 ### 2. Improved Logging
 Enhanced year tracking and logging to show:
@@ -109,6 +113,7 @@ Expected output:
 
 ## Notes
 
-- The fix maintains backward compatibility with dummy data (Unnamed: 0, firm_id)
-- Robust error handling for missing files or mismatched columns
-- Year-by-year progress logging for better debugging
+- **Data Standardization:** The `firm_to_idx_model2.csv` file has been updated to use standardized column names (`사업자등록번호`, `idx`)
+- **Simplified Code:** Removed complex fallback logic for old column names, making the code cleaner and more maintainable
+- **Better Error Messages:** If column names don't match, the error message now shows both expected and actual columns
+- **Year-by-year Logging:** Enhanced progress logging for better debugging during data loading

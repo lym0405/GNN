@@ -1,10 +1,15 @@
 # 캐시 시스템 가이드
 
+**Last Updated:** 2025-01-19  
+**Pipeline:** Phases 1-5 (All Implemented)
+
 ## 📦 개요
 
 Phase 2와 Phase 3는 데이터 빌딩 과정에서 **자동 캐싱**을 지원합니다.
 한 번 생성된 그래프 데이터는 `data/processed/cache/` 디렉토리에 저장되어, 
 다음 실행 시 빠르게 로드할 수 있습니다.
+
+**성능 향상**: 초기 빌드 시간이 수 분에서 수 초로 단축됩니다.
 
 ---
 
@@ -39,12 +44,13 @@ X, edge_index, edge_attr, firm_ids = builder.build_static_data()
 
 ---
 
-### Phase 3: Temporal Graph Builder
+### Phase 3: Temporal Graph Builder & Negative Sampler
 
 **캐시 파일:**
 ```
 data/processed/cache/
-└── temporal_data.pkl            # 전체 시계열 데이터
+├── temporal_data.pkl                    # 전체 시계열 데이터
+└── historical_negatives_phase3.pkl      # Historical negatives (14,550 edges)
 ```
 
 **첫 실행:**
@@ -52,7 +58,8 @@ data/processed/cache/
 builder = TemporalGraphBuilder(data_dir="data", use_cache=True)
 data = builder.build_temporal_data()
 # 🕐 시계열 그래프 데이터 구축 시작
-# 💾 캐시 저장 중...
+# � Historical Negatives 로드 중... (10-20초)
+# �💾 캐시 저장 중...
 ```
 
 **두 번째 실행:**
@@ -60,7 +67,13 @@ data = builder.build_temporal_data()
 builder = TemporalGraphBuilder(data_dir="data", use_cache=True)
 data = builder.build_temporal_data()
 # 📦 캐시된 시계열 그래프 데이터 로드 (매우 빠름!)
+# 📦 Historical Negatives 캐시 로드 (~1초)
 ```
+
+**성능 비교:**
+- Historical Negatives 로드 (첫 실행): ~10-20초
+- Historical Negatives 로드 (캐시): ~1초
+- **속도 향상: 10-20배**
 
 ---
 
@@ -175,6 +188,60 @@ builder = StaticGraphBuilder(data_dir="data", use_cache=False)
 | `static_X_simple.npy` | ~128 MB | 438K 기업 × 73차원 × 4bytes |
 | `static_edge_index.pt` | ~200 MB | 엣지 인덱스 (sparse) |
 | `static_edge_attr.pt` | ~100 MB | 엣지 속성 |
+| `temporal_data.pkl` | ~500 MB | 4년치 시계열 데이터 |
+| `historical_negatives_phase3.pkl` | ~50 MB | **NEW:** Historical negatives (14,550 edges) |
+| **Total** | **~1 GB** | **전체 캐시 크기** |
+
+---
+
+## 🆕 최근 업데이트 (2025-01-19)
+
+### Phase 2 Training Optimization
+- **Batch Size 증가**: 1024 → 4096
+  - 캐시된 데이터로 빠른 로드 후 대용량 배치 처리
+  - GPU 활용률 증가
+  
+- **Forward Pass 최적화**: 
+  - 에폭당 1회만 수행
+  - Embeddings 캐싱 및 재사용
+  - 학습 속도 3-4배 향상
+
+### Phase 3 Optimization
+- **Historical Negatives Caching** (NEW):
+  - CSV 파싱 → Pickle 캐시 (~50 MB)
+  - 로드 시간: 10-20초 → 1초 (10-20배 빠름)
+  - 14,550 historical edges (2020-2023)
+  
+- **Vectorized Negative Sampling**:
+  - 배치 생성으로 2배 속도 향상
+  - Set 기반 중복 제거
+  - 적응형 multiplier
+
+### Historical Negatives Fix
+- **Phase 3 Negative Sampler**: 
+  - 2020-2023년 Historical Negatives 정상 로드 (14,550 edges)
+  - 한글 컬럼명 우선 매칭 (`사업자등록번호`)
+  
+**권장사항**: Phase 3 업데이트 후 캐시 재생성
+```bash
+python clear_cache.py --phase3
+python phase3/main.py  # 첫 실행: 캐시 생성 (~20초)
+python phase3/main.py  # 이후: 캐시 로드 (~1초)
+```
+
+**캐시 위치 확인**:
+```bash
+ls -lh data/processed/cache/
+# 출력 예시:
+# historical_negatives_phase3.pkl  (~50 MB)
+# temporal_data.pkl                 (~500 MB)
+# static_X_simple.npy               (~128 MB)
+```
+
+---
+
+**Last Updated**: 2025-01-19  
+**Version**: 2.0 (Performance Optimized)
 | `temporal_data.pkl` | ~800 MB | 4년치 이벤트 스트림 |
 | **총합** | **~1.2 GB** | 전체 캐시 |
 

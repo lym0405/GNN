@@ -139,34 +139,54 @@ class CurriculumNegativeSampler:
     
     def _sample_random_negatives(self, num_samples: int) -> np.ndarray:
         """
-        완전 랜덤 네거티브 샘플링
+        벡터화된 랜덤 네거티브 샘플링 (속도 개선)
+        
+        최적화 전략:
+        1. 한 번에 여러 개 생성하여 충돌 대비
+        2. 벡터화된 연산으로 필터링
+        3. Set 기반 중복 제거
         
         Returns
         -------
         neg_edges : np.ndarray, shape (num_samples, 2)
         """
-        neg_edges = []
+        neg_edges = set()
+        required = num_samples
         
-        while len(neg_edges) < num_samples:
-            # 랜덤 노드 쌍 생성
-            src = np.random.randint(0, self.num_nodes, size=num_samples*2)
-            dst = np.random.randint(0, self.num_nodes, size=num_samples*2)
+        # 한 번에 1.5배수 정도 생성하여 충돌 대비
+        multiplier = 1.5
+        max_iterations = 100  # 무한 루프 방지
+        iteration = 0
+        
+        while len(neg_edges) < required and iteration < max_iterations:
+            iteration += 1
+            curr_needed = required - len(neg_edges)
+            n_gen = int(curr_needed * multiplier)
             
+            # 벡터화된 난수 생성
+            src = np.random.randint(0, self.num_nodes, size=n_gen)
+            dst = np.random.randint(0, self.num_nodes, size=n_gen)
+            
+            # [최적화 1] Self-loop 제거 (벡터 연산)
+            mask = src != dst
+            src, dst = src[mask], dst[mask]
+            
+            # [최적화 2] Positive 및 중복 필터링
             for s, d in zip(src, dst):
-                if len(neg_edges) >= num_samples:
-                    break
-                
-                # Self-loop 제외
-                if s == d:
-                    continue
-                
-                # Positive 엣지 제외
-                if (s, d) in self.pos_edge_set:
-                    continue
-                
-                neg_edges.append([s, d])
+                if (s, d) not in self.pos_edge_set:
+                    neg_edges.add((s, d))
+                    if len(neg_edges) >= required:
+                        break
+            
+            # 루프가 너무 많이 돌지 않도록 multiplier 조정
+            multiplier = min(multiplier * 1.2, 5.0)  # Cap at 5x
         
-        return np.array(neg_edges)
+        # 만약 충분히 생성되지 않았다면 경고
+        if len(neg_edges) < required:
+            logger.warning(f"  ⚠️  Random negative 샘플링 부족: {len(neg_edges)}/{required}")
+        
+        # 리스트 변환 후 배열화 (필요한 만큼만)
+        return np.array(list(neg_edges)[:num_samples])
     
     def _sample_hard_negatives(self, num_samples: int) -> np.ndarray:
         """

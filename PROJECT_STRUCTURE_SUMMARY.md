@@ -1,7 +1,8 @@
 # GNN Project Structure Summary
 
-**Last Updated:** 2024-01-19  
-**Total Python Files:** 31 project files (excluding .venv and packages)
+**Last Updated:** 2025-01-19  
+**Total Python Files:** 43 project files (excluding .venv and packages)  
+**Pipeline Status:** Phases 1-5 fully implemented and integrated
 
 ## 📁 Directory Structure
 
@@ -66,29 +67,58 @@ GNN/
 │       ├── loss.py                     # RiskAwareBCELoss
 │       └── trainer.py                  # Training loop manager
 │
-└── phase3/  [LINK PREDICTION & EVALUATION]
-    ├── README.md                       # Phase 3 documentation
-    ├── STRUCTURE.txt                   # Phase 3 structure
-    ├── FINAL_SUMMARY.txt               # Phase 3 final summary
-    ├── requirements.txt                # Python dependencies
-    ├── main.py                         # Main execution file (latest)
-    ├── main_old.py                     # Previous version
-    ├── quick_test.py                   # Quick test
-    ├── test.py                         # Test script
-    ├── evaluate_comprehensive.py       # Comprehensive evaluation
-    ├── generate_temporal_networks.py   # Temporal network generation
+│
+├── phase3/  [LINK PREDICTION & EVALUATION]
+│   ├── README.md                       # Phase 3 documentation
+│   ├── STRUCTURE.txt                   # Phase 3 structure
+│   ├── FINAL_SUMMARY.txt               # Phase 3 final summary
+│   ├── PHASE3_HISTORICAL_NEGATIVES_FIX.md # Historical negatives fix doc
+│   ├── requirements.txt                # Python dependencies
+│   ├── main.py                         # Main execution file (latest)
+│   ├── main_old.py                     # Previous version
+│   ├── quick_test.py                   # Quick test
+│   ├── test.py                         # Test script
+│   ├── test_historical_negatives.py    # Test historical negative sampling
+│   ├── evaluate_comprehensive.py       # Comprehensive evaluation
+│   ├── generate_temporal_networks.py   # Temporal network generation
+│   └── src/
+│       ├── temporal_graph_builder.py   # TGN temporal data builder
+│       ├── graphseal.py                # GraphSEAL (DGCNN link prediction)
+│       ├── sc_tgn.py                   # Temporal Graph Network
+│       ├── link_predictor.py           # Link predictor
+│       ├── loss.py                     # Loss functions
+│       ├── trainer_alt.py              # Alternative trainer
+│       ├── hybrid_trainer.py           # Hybrid trainer
+│       ├── benchmarks.py               # Heuristic benchmarks (CN, AA, PA)
+│       ├── metrics.py                  # Evaluation metrics
+│       ├── negative_sampler.py         # Negative sampler (FIXED)
+│       └── robustness_test.py          # Robustness testing
+│
+├── phase4/  [CONSTRAINED REWIRING]
+│   ├── README.md                       # Phase 4 documentation
+│   ├── PHASE4_DESIGN.md                # Design document
+│   ├── PHASE4_SUMMARY.md               # Summary and results
+│   ├── requirements.txt                # Python dependencies
+│   ├── main_phase4.py                  # Main execution file
+│   ├── test_phase4.py                  # Test script
+│   ├── config/                         # Configuration files
+│   └── src/
+│       ├── rewiring_optimizer.py       # Rewiring optimization algorithm
+│       ├── buffer_calculator.py        # Shock buffer calculation
+│       ├── penalty_calculator.py       # Inventory/capacity penalties
+│       ├── constraint_checker.py       # Constraint validation
+│       ├── benchmarks.py               # Greedy, Random benchmarks
+│       └── evaluate_rewiring.py        # Rewiring evaluation
+│
+└── phase5/  [HISTORICAL VALIDATION]
+    ├── README.md                       # Phase 5 documentation
+    ├── PHASE5_DESIGN.md                # Design document
+    ├── PHASE5_IMPLEMENTATION.md        # Implementation details
+    ├── main_phase5.py                  # Main execution file
     └── src/
-        ├── temporal_graph_builder.py   # TGN temporal data builder
-        ├── graphseal.py                # GraphSEAL (DGCNN link prediction)
-        ├── sc_tgn.py                   # Temporal Graph Network
-        ├── link_predictor.py           # Link predictor
-        ├── loss.py                     # Loss functions
-        ├── trainer_alt.py              # Alternative trainer
-        ├── hybrid_trainer.py           # Hybrid trainer
-        ├── benchmarks.py               # Heuristic benchmarks (CN, AA, PA)
-        ├── metrics.py                  # Evaluation metrics
-        ├── negative_sampler.py         # Negative sampler
-        └── robustness_test.py          # Robustness testing
+        ├── shock_injector.py           # Shock injection (2019 Japan)
+        ├── ksic_matcher.py             # KSIC code matching
+        └── evaluator.py                # Historical validation metrics
 ```
 
 ## 🔄 Execution Flow
@@ -108,71 +138,163 @@ GNN/
 
 **Output:**
 - `disentangled_recipes.pkl` (33-dimensional production functions per firm)
+- `recipes_dataframe.csv` (human-readable format)
+- `recipe_validation_report.csv` (validation metrics)
 
 ### Phase 2: Static Graph Embedding
 **Location:** `phase2/main_phase2.py`
 
 **Input:**
-- Phase 1 output
+- Phase 1 output (recipes)
 - Revenue/Export/Asset/TIS data
-- H matrix
+- H matrix (transaction network)
 
 **Processing:**
 - `graph_builder.py`: Build static graph with index alignment
-- Feature generation: Financial + Coordinates + TIS + Industry + Recipe
-- Train/Test edge split
-- GraphSAGE training
-- `sampler.py`: Negative sampling
-- `loss.py`: TIS-based loss function
+- Feature generation: Financial + Coordinates + TIS + Industry + Recipe (73-dim)
+- Train/Test edge split (80/20)
+- GraphSAGE training (2-layer SAGEConv)
+- `sampler.py`: Historical Hard (50%) + Random (50%) negative sampling
+- `loss.py`: TIS-based Risk-Aware BCE Loss
 
 **Output:**
 - `node_embeddings_static.pt` (32-dim node embeddings)
-- `train_edges.npy` (training edges)
-- `test_edges.npy` (test edges)
+- `X_feature_matrix.npy` (73-dim feature matrix)
+- `train_edges.npy`, `test_edges.npy`
+- `recipe_features_cache.npy`
+- `tis_score_normalized.npy`
 
 ### Phase 3: Link Prediction & Evaluation
 **Location:** `phase3/main.py`
 
 **Input:**
-- Phase 2 embeddings
-- Edge data
+- Phase 2 embeddings and features
+- Temporal edge data (2020-2024)
+- Historical negative edges (14,550 edges from 4 years)
 
 **Processing:**
-- GraphSEAL (DGCNN): Subgraph structure learning
-- Temporal graph analysis (`temporal_graph_builder.py`)
-- Benchmarks: Common Neighbors, Adamic-Adar, etc.
+- `temporal_graph_builder.py`: Build temporal snapshots
+- GraphSEAL (DGCNN): Subgraph structure learning for link prediction
+- SC-TGN: Temporal graph network with memory
+- `negative_sampler.py`: Load historical negatives + generate new negatives
+- Benchmarks: Common Neighbors, Adamic-Adar, Preferential Attachment
 
 **Output:**
 - Trained link prediction model
+- Evaluation metrics (ROC-AUC, Precision@K)
+- Temporal evolution analysis
 
-**Evaluation:**
-- ROC-AUC
-- Precision@K
+**Key Fix (Jan 2025):**
+- Fixed historical negative sampling (was loading 0, now loads 14,550 edges)
+- Corrected Korean column name matching in `firm_to_idx_model2.csv`
+
+### Phase 4: Constrained Rewiring
+**Location:** `phase4/main_phase4.py`
+
+**Input:**
+- Phase 3 predictions (top-K candidate links)
+- Production functions (Phase 1)
+- Network structure and constraints
+
+**Processing:**
+- `rewiring_optimizer.py`: Optimize rewiring under constraints
+- `buffer_calculator.py`: Calculate shock absorption capacity
+- `penalty_calculator.py`: Compute inventory and capacity penalties
+- `constraint_checker.py`: Validate feasibility
+- `benchmarks.py`: Compare with Greedy and Random strategies
+
+**Output:**
+- Optimized rewiring recommendations
+- Constraint satisfaction report
+- Performance comparison with baselines
+
+**Constraints:**
+- Inventory capacity limits
+- Production capacity limits
+- Geographic distance constraints
+- Recipe compatibility
+
+### Phase 5: Historical Validation
+**Location:** `phase5/main_phase5.py`
+
+**Input:**
+- Full pipeline outputs (Phases 1-4)
+- Historical event data (2019 Japan Export Restriction)
+
+**Processing:**
+- `shock_injector.py`: Inject historical shock to network
+- `ksic_matcher.py`: Match affected industries (semiconductors, displays)
+- `evaluator.py`: Compare predictions vs. actual outcomes
+
+**Output:**
+- Validation metrics (precision, recall, accuracy)
+- Comparison: Model predictions vs. actual network evolution
+- Case study analysis
+
+**Historical Event:**
+- Event: July 2019 Japan export restrictions on South Korea
+- Affected: Semiconductors (C261), Display panels (C262)
+- Impact: Supply chain disruptions, forced rewiring
 
 ## 📊 Data Statistics
 
 - **Nodes (Firms):** 438,946
-- **Edges (Transactions):** Millions
+- **Edges (Transactions):** Millions (varies by year)
 - **Time Period:** 2020-2024 (5 years)
-- **Embedding Dimension:** 32
+- **Node Embedding Dimension:** 32 (GraphSAGE output)
+- **Node Feature Dimension:** 73 (input features)
 - **Recipe Dimension:** 33 (IO table sectors)
+- **Historical Negative Edges:** 14,550 (across 4 years: 2020-2023)
+- **IO Sectors:** 33 (Korean Input-Output table classification)
 
 ## 🔑 Key Components
 
 ### Phase 1 Modules
 - **BMatrixGenerator:** Generate B matrix from transaction shares
+  - Maps firms to 33 IO sectors using `IO상품_단일_대분류_코드`
 - **ZeroShotInventoryModule:** Estimate production functions
+  - 33-dimensional recipe vectors per firm
 
 ### Phase 2 Modules
 - **graph_builder.py:** Static graph construction with alignment
+  - 73-dim features: Financial (3) + Coordinates (2) + TIS (1) + Industry (33) + Recipe (33) + Other (1)
 - **GraphSAGE.py:** 2-layer SAGEConv for embeddings
-- **sampler.py:** Historical Hard + Random negative sampling
+  - Input: 73-dim → Hidden: 64-dim → Output: 32-dim
+- **sampler.py:** Historical Hard (50%) + Random (50%) negative sampling
+  - Optimized from 1:9 to 1:2 negative ratio
+  - Batch size increased from 1024 to 4096
 - **loss.py:** TIS-based Risk-Aware BCE Loss
+  - Weighted by supply chain risk scores
 
 ### Phase 3 Modules
 - **graphseal.py:** GraphSEAL with DGCNN for link prediction
+  - Subgraph extraction and structure learning
 - **temporal_graph_builder.py:** Build temporal graph events for TGN
-- **benchmarks.py:** Heuristic benchmarks (CN, AA, PA)
+  - Snapshots across 2020-2024
+- **negative_sampler.py:** Load historical negatives + generate new negatives
+  - **FIXED:** Korean column name matching (`사업자등록번호`)
+  - Now loads 14,550 historical edges (was 0)
+- **benchmarks.py:** Heuristic benchmarks
+  - Common Neighbors (CN), Adamic-Adar (AA), Preferential Attachment (PA)
+
+### Phase 4 Modules
+- **rewiring_optimizer.py:** Constrained optimization for rewiring
+  - Linear programming or heuristic search
+- **buffer_calculator.py:** Shock absorption capacity
+  - Based on production functions and inventory
+- **penalty_calculator.py:** Inventory and capacity penalties
+  - Soft constraints for realistic rewiring
+- **constraint_checker.py:** Hard constraint validation
+  - Recipe compatibility, capacity limits, distance
+
+### Phase 5 Modules
+- **shock_injector.py:** Historical shock injection
+  - 2019 Japan export restrictions
+  - Removes/weakens edges from Japanese suppliers
+- **ksic_matcher.py:** Industry code matching
+  - Maps KSIC codes to affected sectors (C261, C262)
+- **evaluator.py:** Validation metrics
+  - Compares model predictions with actual 2019-2020 network changes
 
 ## 📝 Key Files
 
@@ -186,11 +308,48 @@ GNN/
 
 ## 🎯 Core Algorithms
 
-1. **Production Function Estimation:** Zero-shot learning based
-2. **Graph Embedding:** GraphSAGE (Inductive learning)
-3. **Link Prediction:** GraphSEAL (DGCNN) + Temporal analysis
-4. **Negative Sampling:** Historical Hard + Random
-5. **Loss Function:** TIS-based Risk-Aware BCE Loss
+1. **Production Function Estimation (Phase 1):** 
+   - Zero-shot learning based on IO table and transaction shares
+   - 33-dimensional recipe vectors per firm
+
+2. **Graph Embedding (Phase 2):** 
+   - GraphSAGE (Inductive learning)
+   - 2-layer SAGEConv: 73-dim → 64-dim → 32-dim
+
+3. **Link Prediction (Phase 3):** 
+   - GraphSEAL (DGCNN) for subgraph structure
+   - SC-TGN for temporal evolution
+   - Historical + Random negative sampling (50/50)
+
+4. **Rewiring Optimization (Phase 4):**
+   - Constrained optimization with hard/soft constraints
+   - Buffer calculation and penalty functions
+   - Greedy and Random baselines for comparison
+
+5. **Historical Validation (Phase 5):**
+   - Shock injection (2019 Japan export restrictions)
+   - KSIC matching for affected industries
+   - Precision/Recall evaluation vs. actual outcomes
+
+## 🐛 Recent Bug Fixes & Optimizations
+
+### Phase 3: Historical Negatives Fix (Jan 2025) - CRITICAL
+- **Problem:** Historical negatives always showed 0
+- **Cause:** Korean column name mismatch in `firm_to_idx_model2.csv`
+- **Solution:** Fixed column priority to check `사업자등록번호` first
+- **Impact:** Now loads 14,550 historical edges across 4 years
+- **Commit:** `3f4dde0`
+
+### Phase 2: Training Optimization (Dec 2024)
+- **Changes:** 
+  - Negative sampling ratio: 1:9 → 1:2
+  - Batch size: 1024 → 4096
+- **Impact:** ~3-4x faster training
+
+### Cache System
+- Automatic caching in `data/processed/cache/`
+- Use `clear_cache.py` to force rebuild
+- See `CACHE_GUIDE.md` for details
 
 ## 📦 Data Files
 
@@ -210,4 +369,4 @@ GNN/
 
 ---
 
-**Note:** This structure reflects the current state of the project. The `structure` file contains the full detailed documentation.
+**Note:** This structure reflects the current state of the project (January 2025). All 5 phases are implemented and integrated. For detailed column specifications, see `COLUMN_NAME_UPDATE.md`. For cache management, see `CACHE_GUIDE.md`. For full project documentation, see `structure` file and phase-specific README files.

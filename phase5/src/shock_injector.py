@@ -307,3 +307,183 @@ def create_shock_scenario(
     
     else:
         raise ValueError(f"Unknown shock_type: {shock_type}")
+
+
+def propagate_shock_gpu(
+    adj_matrix: torch.sparse.FloatTensor,
+    initial_shock: torch.Tensor,
+    steps: int = 30,
+    activation_fn: str = 'sigmoid',
+    threshold: float = 0.5
+) -> torch.Tensor:
+    """
+    GPU 기반 병렬 충격 전파 시뮬레이션 (배치 처리)
+    
+    [최적화] 순차적 노드 반복 대신 행렬 곱으로 한 번에 처리
+    - Before: for node in nodes: ... → O(N × steps)
+    - After: Sparse Matrix Multiplication → O(nnz × steps)
+    - 배치 처리: 100개 시나리오를 한 번의 연산으로 처리
+    
+    Parameters
+    ----------
+    adj_matrix : torch.sparse.FloatTensor
+        인접 행렬 (N × N, sparse)
+    initial_shock : torch.Tensor
+        초기 충격 벡터
+        - Shape: (batch_size, N) 또는 (N,)
+        - 여러 시나리오 동시 실행 가능
+    steps : int
+        전파 스텝 수
+    activation_fn : str
+        활성화 함수 ('sigmoid', 'relu', 'threshold')
+    threshold : float
+        임계값 (activation_fn='threshold'일 때)
+    
+    Returns
+    -------
+    history : torch.Tensor
+        충격 전파 히스토리
+        - Shape: (steps, batch_size, N)
+    
+    Notes
+    -----
+    병렬 처리 예시:
+    - 100개의 서로 다른 충격 시나리오를 동시에 시뮬레이션
+    - GPU 메모리가 허용하는 한 무한정 확장 가능
+    - 단일 시나리오 대비 100배 시나리오도 거의 같은 시간
+    
+    Example
+    -------
+    >>> adj = torch.sparse_coo_tensor(...)  # N × N
+    >>> # 100개 시나리오
+    >>> initial_shocks = torch.randn(100, N)  # 각 시나리오마다 다른 충격
+    >>> history = propagate_shock_gpu(adj, initial_shocks, steps=30)
+    >>> history.shape  # (30, 100, N)
+    """
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    
+    # GPU로 이동
+    current_status = initial_shock.to(device)
+    adj = adj_matrix.to(device)
+    
+    # 배치 처리를 위한 차원 확인
+    if current_status.dim() == 1:
+        current_status = current_status.unsqueeze(0)  # (N,) → (1, N)
+    
+    batch_size, num_nodes = current_status.shape
+    
+    history = []
+    
+    logger.info(f"🚀 GPU 충격 전파 시작")
+    logger.info(f"   - Device: {device}")
+    logger.info(f"   - Batch Size: {batch_size}")
+    logger.info(f"   - 노드 수: {num_nodes:,}")
+    logger.info(f"   - Steps: {steps}")
+    
+    # [최적화 2] 조기 종료를 위한 변수
+    convergence_threshold = 1e-4  # 변화량이 이 값 이하면 수렴으로 판단
+    prev_status = None
+    
+    for step in range(steps):
+        # [최적화] Sparse Matrix Multiplication
+        # for node in nodes: ... 대신 행렬 곱 한 번
+        # 100개의 시나리오를 한 번의 연산으로 처리 (Batch Processing)
+        
+        # current_status: (batch_size, N)
+        # adj: (N, N) sparse
+        # result: (batch_size, N)
+        
+        # torch.sparse.mm은 2D만 지원하므로 transpose 활용
+        impact = torch.sparse.mm(adj, current_status.t()).t()
+        
+        # 활성화 함수 적용
+        if activation_fn == 'sigmoid':
+            current_status = torch.sigmoid(impact)
+        elif activation_fn == 'relu':
+            current_status = torch.relu(impact)
+        elif activation_fn == 'threshold':
+            current_status = (impact > threshold).float()
+        else:
+            current_status = impact  # identity
+        
+        history.append(current_status.clone())
+        
+        # [최적화 2] 조기 종료 (Early Stopping)
+        # 더 이상 충격이 전파되지 않는 Steady State 도달 시 종료
+        if prev_status is not None:
+            # 모든 배치에 대해 변화량 계산
+            diff = torch.abs(current_status - prev_status).max().item()
+            
+            if diff < convergence_threshold:
+                logger.info(
+                    f"   🛑 조기 종료 (Step {step+1}/{steps}): "
+                    f"수렴 감지 (diff={diff:.6f})"
+                )
+                break
+        
+        prev_status = current_status.clone()
+        
+        if (step + 1) % 10 == 0:
+            logger.info(f"   ✓ Step {step+1}/{steps}")
+    
+    # Stack: (steps, batch_size, N)
+    history_tensor = torch.stack(history)
+    
+    logger.info(f"✅ GPU 충격 전파 완료")
+    logger.info(f"   - 실제 Steps: {len(history)}/{steps}")
+    logger.info(f"   - Output Shape: {history_tensor.shape}")
+    
+    return history_tensor
+
+
+def propagate_shock_cpu(
+    adj_matrix: np.ndarray,
+    initial_shock: np.ndarray,
+    steps: int = 30,
+    convergence_threshold: float = 1e-4
+) -> np.ndarray:
+    """
+    CPU 기반 충격 전파 (단일 시나리오)
+    
+    GPU가 없는 환경을 위한 폴백
+    [최적화 2] 조기 종료 포함
+    
+    Parameters
+    ----------
+    adj_matrix : np.ndarray
+        인접 행렬 (N × N)
+    initial_shock : np.ndarray
+        초기 충격 벡터 (N,)
+    steps : int
+        최대 전파 스텝 수
+    convergence_threshold : float
+        수렴 판단 임계값
+    
+    Returns
+    -------
+    history : np.ndarray
+        충격 전파 히스토리 (actual_steps, N)
+    """
+    current_status = initial_shock.copy()
+    history = []
+    prev_status = None
+    
+    for step in range(steps):
+        # 행렬 곱
+        impact = adj_matrix @ current_status
+        current_status = 1 / (1 + np.exp(-impact))  # sigmoid
+        history.append(current_status.copy())
+        
+        # [최적화 2] 조기 종료
+        if prev_status is not None:
+            diff = np.abs(current_status - prev_status).max()
+            if diff < convergence_threshold:
+                logger.info(
+                    f"   🛑 조기 종료 (Step {step+1}/{steps}): "
+                    f"수렴 감지 (diff={diff:.6f})"
+                )
+                break
+        
+        prev_status = current_status.copy()
+    
+    return np.array(history)
