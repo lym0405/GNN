@@ -1,15 +1,23 @@
 GNN/
 │
-├── CACHE_GUIDE.md              # 🆕 캐시 시스템 가이드
-├── clear_cache.py              # 🆕 캐시 삭제 유틸리티
+├── .git/                        # Git 버전 관리
+├── .gitignore                   # Git 제외 파일 설정
+├── .venv/                       # Python 가상 환경 (미포함)
+│
+├── CACHE_GUIDE.md              # 캐시 시스템 가이드
+├── COLUMN_NAME_UPDATE.md       # 컬럼명 업데이트 가이드
+├── clear_cache.py              # 캐시 삭제 유틸리티
 │
 ├── data/
 │   ├── raw/  # [원본 데이터] (절대 수정 금지)
-│   │   ├── posco_network_capital_consumergoods_removed_2020.csv
-│   │   ├── posco_network_capital_consumergoods_removed_2021.csv
-│   │   ├── posco_network_capital_consumergoods_removed_2022.csv
-│   │   ├── posco_network_capital_consumergoods_removed_2023.csv
-│   │   ├── posco_network_capital_consumergoods_removed_2024.csv
+│   │   ├── posco_network_capital_consumergoods_removed_{year}.csv
+│   │   │   (ye4. 개별 기업의 총매출액
+    - *컬럼*
+        
+        tg_2024_filtered.csv
+        ['업체번호', 'tg_2024_final']
+        
+5. 개별 기업의 소재지 (기업 간 거리가 가까울수록 거래관계일 확률이 올라감)20, 2021, 2022, 2023)
 │   │   │   → 컬럼: 사업자등록번호, 거래처사업자등록번호, 총공급금액 등
 │   │   │
 │   │   ├── H_csr_model2.npz            # 거래 네트워크 행렬 (Sparse, 438K×438K)
@@ -17,222 +25,215 @@ GNN/
 │   │   │
 │   │   ├── vat_20-24_company_list_w_companyinfo_nocutoff_v3_hyundaisteel_hj.csv
 │   │   │   → 전체 기업 정보 (업체번호, 사업자등록번호, 좌표, 산업코드)
-│   │   ├── vat_20-24_company_list_w_companyinfo_cutoff_q1more_v3_hyundaisteel_hj.csv
-│   │   │   → Q1 컷오프 기업 정보
 │   │   │
 │   │   ├── A_33.csv                    # 국가 IO 테이블 (33×33)
 │   │   ├── tg_2024_filtered.csv        # 매출 데이터 (업체번호, tg_2024_final)
-│   │   ├── final_tg_2024_estimation.csv # 매출 추정 (Phase 1용)
 │   │   ├── export_estimation_value_final.csv # 수출액 (천원 단위)
 │   │   ├── asset_final_2024_6차.csv     # 자산 추정
 │   │   └── shock_after_P_v2.csv        # TIS 리스크 점수
 │   │   
 │   └── processed/  # [전처리 결과 및 모델 출력]
-│       ├── cache/              # 🆕 캐시 디렉토리 (자동 생성)
-│       │   ├── static_X_simple.npy      # Phase 2: 노드 피처 (73차원)
-│       │   ├── static_edge_index.pt     # Phase 2: 엣지 인덱스
-│       │   ├── static_edge_attr.pt      # Phase 2: 엣지 속성
-│       │   ├── static_firm_ids.pkl      # Phase 2: 기업 ID
-│       │   └── temporal_data.pkl        # Phase 3: 시계열 데이터 (~10-20분 → 5초)
-│       │
 │       ├── disentangled_recipes.pkl    # Phase 1: 기업별 생산함수 (33차원)
+│       ├── recipes_dataframe.csv       # Phase 1: 레시피 데이터프레임
+│       ├── recipe_validation_report.csv # Phase 1: 레시피 검증 리포트
 │       │
+│       ├── B_matrix.npy                # Phase 1: B 행렬
 │       ├── X_feature_matrix.npy        # Phase 2: 피처 행렬 (N×197)
 │       ├── recipe_features_cache.npy   # Phase 2: 레시피 캐싱 (속도 향상)
 │       ├── tis_score_normalized.npy    # Phase 2: TIS 정규화 점수
 │       ├── node_embeddings_static.pt   # Phase 2: GraphSAGE 임베딩 (N×32)
 │       │
-│       ├── train_edges.npy             # 🆕 Phase 2: Train 엣지 (80%, Data Leakage 방지)
-│       ├── test_edges.npy              # 🆕 Phase 2: Test 엣지 (20%, 평가용)
-│       │
-│       ├── temporal_events_cache.pt    # Track A: TGN 시계열 이벤트 캐시
-│       ├── tgn_scores_test.npy         # Track A: TGN 예측 점수
-│       │
-│       ├── final_hybrid_model_strict.pt # Phase 3: GraphSEAL 학습 모델
-│       ├── final_mixer_model.pt        # Phase 3: LinkMixer 앙상블 모델
-│       │
-│       └── H_prime_rewired.npz         # Phase 4: 재배선된 네트워크
+│       ├── train_edges.npy             # Phase 2: Train 엣지 (80%, Data Leakage 방지)
+│       └── test_edges.npy              # Phase 2: Test 엣지 (20%, 평가용)
 │
-├── src/  # [핵심 모듈]
+├── results/                     # 실행 결과 저장 디렉토리
+│   └── quick_test/              # 빠른 테스트 결과
+│
+├── trash/                       # (비어 있음) 임시 파일 보관
+│
+├── phase1/  # [Phase 1: 생산함수 추정]
+│   ├── README.md                     # Phase 1 설명서
+│   ├── STRUCTURE.txt                 # Phase 1 구조 문서
+│   ├── requirements.txt              # Phase 1 Python 의존성
+│   ├── quick_test.sh                 # Phase 1 빠른 테스트 스크립트
 │   │
-│   ├── # --- [Data Builders] ---
-│   ├── graph_builder.py          # ✅ 정적 그래프 빌더 (인덱스 정렬 수정 완료)
-│   │   → build_static_data(): .reindex()로 강제 정렬
-│   │   → NaN 박멸: np.nan_to_num() 이중 방어
-│   │   → 레시피 캐싱: recipe_features_cache.npy
-│   │   → TIS 별도 저장: tis_score_normalized.npy
+│   ├── generate_dummy_data.py        # 더미 데이터 생성
+│   ├── main_phase1.py                # Phase 1 메인 실행 파일
 │   │
-│   ├── temporal_builder.py       # TGN용 시계열 데이터 구축
-│   ├── dynamic_graph_builder.py  # 동적 그래프 이벤트 생성
-│   ├── data_prep.py              # 데이터 분할 및 샘플링
-│   │
-│   ├── seal_utils.py             # ✅ GraphSEAL 서브그래프 추출 & DRNL (엣지 마스킹 완료)
-│   │   → SEALDataset 클래스
-│   │   → extract_enclosing_subgraphs()
-│   │   → 🆕 Target edge 마스킹: 예측 대상 엣지를 서브그래프에서 제거
-│   │
-│   ├── sampler.py                # ✅ 네거티브 샘플링 (컬럼명 수정 완료)
-│   │   → StanfordNegativeSampler 클래스
-│   │   → Historical Hard Negative (2020-2023 이력)
-│   │   → Random Negative
-│   │
-│   ├── # --- [Models] ---
-│   ├── GraphSAGE.py              # 정적 임베딩 (2-Layer SAGEConv)
-│   ├── GAT.py                    # Graph Attention Network
-│   ├── GraphSEAL.py              # DGCNN 구조적 링크 예측
-│   ├── LinkMixer.py              # 경량 MLP 앙상블 모델
-│   ├── TGN.py                    # Temporal Graph Network
-│   │
-│   ├── # --- [Training & Evaluation] ---
-│   ├── loss.py                   # ✅ RiskAwareBCELoss
-│   │   → TIS 기반 Soft Label: 1.0 - (alpha × TIS)
-│   │   → 출력 키: avg_pos_score, avg_rand_score, avg_hist_score
-│   │
-│   ├── trainer.py                # 학습 루프 관리
-│   ├── evaluator.py              # 앙상블 평가 & Robustness Test
-│   ├── benchmark.py              # 휴리스틱 벤치마크 (CN, AA, PA)
-│   │
-│   ├── # --- [Optimization & Simulation] ---
-│   ├── rewiring.py               # SupplyChainOptimizer (Phase 4)
-│   ├── simulation.py             # ResilienceSimulator (Phase 5)
-│   │
-│   └── # --- [Phase 1 Utils] ---
+│   └── src/
+│       ├── b_matrix_generator.py     # BMatrixGenerator (변수명 수정 완료)
 │       ├── inventory_module.py       # ZeroShotInventoryModule
-│       ├── b_matrix_generator.py     # ✅ BMatrixGenerator (변수명 수정)
-│       │   → biz_share_map, biz_sector_map 사용
 │       ├── check_recipe.py           # 레시피 검증
-│       └── debug_deep_dive.py        # 디버그 도구        
-│ 
-├── # [메인 실행 파이프라인]
+│       └── debug_deep_dive.py        # 디버그 도구
 │
-├── backup/                      # 백업 폴더 (이전 버전 보관)
-│   ├── main_phase1.py           # Phase 1 백업
-│   ├── main_phase2.py           # Phase 2 백업 (원본)
-│   ├── main_track_A.py          # Track A 백업
-│   ├── main_phase3_mixer.py     # Mixer 백업
-│   ├── main_sanity_check.py     # 진단 스크립트 백업
-│   ├── debug_alignment.py       # 정합성 검증 백업
-│   └── check_b_vector.py        # ✅ B벡터 검증 (변수명 수정 완료)
+├── phase2/  # [Phase 2: 정적 그래프 임베딩]
+│   ├── README.md                     # Phase 2 설명서
+│   ├── STRUCTURE.txt                 # Phase 2 구조 문서
+│   ├── requirements.txt              # Phase 2 Python 의존성
+│   ├── quick_test_phase2.sh          # Phase 2 빠른 테스트 스크립트
+│   │
+│   ├── main_phase2.py                # Phase 2 메인 실행 파일
+│   ├── test_phase2.py                # Phase 2 테스트 스크립트
+│   │
+│   └── src/
+│       ├── graph_builder.py          # 정적 그래프 빌더 (인덱스 정렬 수정 완료)
+│       ├── GraphSAGE.py              # GraphSAGE 모델 (2-Layer SAGEConv)
+│       ├── sampler.py                # 네거티브 샘플링 (컬럼명 수정 완료)
+│       ├── loss.py                   # RiskAwareBCELoss
+│       └── trainer.py                # 학습 루프 관리
 │
-├── # [현재 실행 파일] ⭐
+├── phase3/  # [Phase 3: 링크 예측 & 평가]
+│   ├── README.md                     # Phase 3 설명서
+│   ├── STRUCTURE.txt                 # Phase 3 구조 문서
+│   ├── FINAL_SUMMARY.txt             # Phase 3 최종 요약
+│   ├── requirements.txt              # Phase 3 Python 의존성
+│   │
+│   ├── main.py                       # Phase 3 메인 실행 파일 (최신)
+│   ├── main_old.py                   # Phase 3 이전 버전
+│   ├── quick_test.py                 # 빠른 테스트
+│   ├── test.py                       # 테스트 스크립트
+│   ├── evaluate_comprehensive.py     # 종합 평가
+│   ├── generate_temporal_networks.py # 시계열 네트워크 생성
+│   │
+│   └── src/
+│       ├── temporal_graph_builder.py # TGN용 시계열 데이터 구축
+│       ├── graphseal.py              # GraphSEAL (DGCNN 구조적 링크 예측)
+│       ├── sc_tgn.py                 # Temporal Graph Network
+│       ├── link_predictor.py         # 링크 예측기
+│       ├── loss.py                   # 손실 함수
+│       ├── trainer_alt.py            # 대체 트레이너
+│       ├── hybrid_trainer.py         # 하이브리드 트레이너
+│       ├── benchmarks.py             # 휴리스틱 벤치마크 (CN, AA, PA)
+│       ├── metrics.py                # 평가 메트릭
+│       ├── negative_sampler.py       # 네거티브 샘플러
+│       └── robustness_test.py        # 강건성 테스트
 │
-├── main_phase2_fixed.py         # 🆕 Phase 2: Train/Test 분리 버전 (Data Leakage 방지)
-│   → main_phase2.py 구조 유지하면서 Train/Test 엣지 분할 추가
-│   → Train 엣지만으로 GraphSAGE 학습 (Test는 완전 격리)
-│   → 출력: node_embeddings_static.pt, train_edges.npy, test_edges.npy
-│
-├── main_phase3_train.py         # ✅ Phase 3: GraphSEAL 학습 (Data Leakage 방지)
-│   → Phase 2의 train_edges.npy만 사용하여 학습
-│   → SEALDataset: Target edge 마스킹 적용
-│   → Test 엣지는 benchmark에서만 사용
-│   → 출력: final_hybrid_model_strict.pt
-│
-├── main_phase3_benchmark.py     # ✅ Phase 3: 벤치마크 평가 (Data Leakage 방지)
-│   → Phase 2의 test_edges.npy로 최종 평가
-│   → Common Neighbors, Adamic-Adar 등
-│   → GraphSEAL 성능 비교
-│   → Leaderboard 출력
-│
-├── verify_no_leakage.py         # 🆕 Data Leakage 검증 스크립트
-│   → CHECK 1: Train/Test 엣지 Overlap 확인
-│   → CHECK 2: SEALDataset 엣지 마스킹 확인
-│   → CHECK 3: Zero Embedding AUC 테스트 (핵심!)
-│   → CHECK 4: Hard Negatives AUC 테스트
-│
-├── verify_data_leakage.py       # 🆕 Data Leakage 자동 검증 (상세 버전)
-│   → verify_no_leakage.py와 동일한 기능
-│   → 추가 통계 및 상세 리포트
-│
-├── VERIFICATION_GUIDE.txt       # 🆕 검증 가이드 문서
-│   → 실행 순서, 해석 방법, 주의사항
-│
-├── LEAKAGE_FIXES_SUMMARY.txt    # 🆕 Data Leakage 수정 요약
-│   → 4가지 체크 항목별 수정 내용
-│
-├── main_phase4.py               # Phase 4: 공급망 재배선
-│   → SupplyChainOptimizer 사용
-│   → 단절 시나리오 시뮬레이션
-│   → 최적 대체 공급자 추천
-│   → 출력: H_prime_rewired.npz
-│
-├── main_phase5.py               # Phase 5: 리질리언스 검증
-│   → ResilienceSimulator 사용
-│   → H vs H' 충격 전파 비교
-│   → Economic Loss 계산
-│   → Delta Output 분석
+├── phase4/  # [Phase 4: 제약 기반 최적 재배선] (설계 완료, 구현 예정)
+│   ├── README.md                     # Phase 4 설명서
+│   ├── PHASE4_DESIGN.md              # Phase 4 설계 문서
+│   ├── requirements.txt              # Phase 4 Python 의존성
+│   │
+│   ├── main_phase4.py                # Phase 4 메인 실행 파일 (예정)
+│   ├── evaluate_rewiring.py          # 재배선 평가 스크립트 (예정)
+│   │
+│   └── src/
+│       ├── rewiring_optimizer.py     # 재배선 최적화 알고리즘
+│       │   → Buffer 계산: f(z_v) × 1/(TIS_v + ε)
+│       │   → 최종 스코어: P(u,v) × Buffer(v) - Penalty_inv
+│       ├── buffer_calculator.py      # 충격완충력 계산
+│       ├── penalty_calculator.py     # 재고/용량 패널티 계산
+│       ├── constraint_checker.py     # 제약 조건 검증
+│       └── benchmarks.py             # Greedy, Random 벤치마크
 │
 ├── columns                      # 데이터 명세서 (텍스트)
 └── structure                    # 프로젝트 구조 문서 (본 파일)
 
 # ============================================================
-# 전체 실행 플로우 (2026.01.18 최신)
+# 전체 실행 플로우
 # ============================================================
 
-[Phase 1] 생산함수 추정 (backup/main_phase1.py)
+[Phase 1] 생산함수 추정 (phase1/main_phase1.py)
   입력: IO 테이블, H 행렬, 기업정보, 매출, 거래 데이터
   처리: BMatrixGenerator → ZeroShotInventoryModule
   출력: disentangled_recipes.pkl (기업별 33차원 생산함수)
   
-[Phase 2] 정적 임베딩 (main_phase2_fixed.py) 🆕 Data Leakage 방지 버전
+[Phase 2] 정적 그래프 임베딩 (phase2/main_phase2.py)
   입력: Phase 1 출력 + 매출/수출/자산/TIS + H 행렬
   처리: 
-    - graph_builder.py: 인덱스 정렬 (.reindex)
-    - 피처 생성 (197차원): 재무4 + 좌표2 + TIS1 + 산업분류 + 레시피33
-    - 🆕 Train/Test 엣지 분할 (80/20, random_state=42)
-    - GraphSAGE 학습 (Curriculum: Easy→Hard) - Train 엣지만 사용!
-    - sampler.py: 1:1 → 1:9:9 네거티브 샘플링
-    - loss.py: TIS 기반 Soft Label
+    - graph_builder.py: 정적 그래프 구축 및 인덱스 정렬
+    - 피처 생성: 재무 + 좌표 + TIS + 산업분류 + 레시피
+    - Train/Test 엣지 분할
+    - GraphSAGE 학습
+    - sampler.py: 네거티브 샘플링
+    - loss.py: TIS 기반 손실 함수
   출력: 
-    - node_embeddings_static.pt (N×32)
-    - train_edges.npy (학습용, 80%)
-    - test_edges.npy (평가용, 20%)
-  
-[Track A] 동적 임베딩 (backup/main_track_A.py) - 선택적
-  입력: 시계열 거래 데이터 (2020-2023, 2024년 제외)
-  캐시: temporal_events_cache.pt
-  처리: TGN Memory 모듈
-  출력: tgn_scores_test.npy
+    - node_embeddings_static.pt (노드 임베딩)
+    - train_edges.npy (학습용 엣지)
+    - test_edges.npy (평가용 엣지)
 
-[Phase 3] Link Prediction (main_phase3_train.py + main_phase3_benchmark.py) 🆕
-  입력: Phase 2 임베딩 + train_edges.npy + test_edges.npy
+[Phase 3] 링크 예측 & 평가 (phase3/main.py)
+  입력: Phase 2 임베딩 + 엣지 데이터
   처리: 
-    - GraphSEAL (DGCNN): 서브그래프 구조 학습 (Train 엣지만!)
-    - SEALDataset: Target edge 마스킹 (예측 대상 엣지 제거)
-    - 벤치마크: Common Neighbors, Adamic-Adar 비교 (Test 엣지)
-  출력: final_hybrid_model_strict.pt
-  평가: ROC-AUC, Precision@K (Test 엣지로만)
+    - GraphSEAL (DGCNN): 서브그래프 구조 학습
+    - 시계열 그래프 분석 (temporal_graph_builder.py)
+    - 벤치마크: Common Neighbors, Adamic-Adar 등
+  출력: 
+    - 학습된 링크 예측 모델
+    - link_predictions.npy (링크 예측 확률)
+  평가: ROC-AUC, Precision@K
 
-[검증] Data Leakage 체크 (verify_no_leakage.py) 🆕
-  입력: 모든 Phase 2~3 출력물
+[Phase 4] 제약 기반 최적 재배선 (phase4/main_phase4.py) 🆕 설계 완료
+  입력: 
+    - Phase 3 링크 예측 확률
+    - Phase 2 TIS 점수
+    - Phase 1 생산함수 (레시피)
+    - 재무 데이터 (매출, 자산, 영업이익)
+    - 단절 시나리오 (관세 타격 대상)
   처리:
-    - CHECK 1: Train/Test 엣지 Overlap 확인
-    - CHECK 2: SEALDataset 엣지 마스킹 확인
-    - CHECK 3: Zero Embedding AUC 테스트 (< 0.65 = PASS)
-    - CHECK 4: Hard Negatives AUC 테스트 (> 0.65 = PASS)
-  출력: Data Leakage 진단 리포트
+    - 충격완충력 계산: Buffer(v) = f(z_v) × 1/(TIS_v + ε)
+    - 최종 스코어링: Score = P(u,v) × Buffer(v) - Penalty_inv
+    - 제약 조건 기반 재배선 선택
+  출력:
+    - rewiring_map.pkl (재배선 매핑)
+    - H_prime_rewired.npz (재배선된 네트워크)
+    - buffer_scores.npy (충격완충력)
+  벤치마크: Greedy, Random
 
-[Phase 4] 공급망 재배선 (main_phase4.py)
-  입력: Phase 2 임베딩 + Phase 3 예측 점수
-  처리: 
-    - SupplyChainOptimizer: 제약 조건 최적화
-    - TIS 최소화, 유사도 최대화
-  출력: H_prime_rewired.npz
-
-[Phase 5] 리질리언스 검증 (main_phase5.py)
-  입력: 원본 H + 재배선 H'
-  처리: 
-    - ResilienceSimulator: Shock Propagation
-    - H vs H' 경제적 손실 비교
-  출력: Delta Output, 시각화 그래프
+[Phase 5] 리질리언스 시뮬레이션 (phase5/main_phase5.py) 🆕 예정
+  입력: 
+    - H_original (원본 네트워크)
+    - H_prime_rewired (재배선 네트워크)
+  처리:
+    - 충격 전파 시뮬레이션
+    - 경제적 손실 계산
+  출력:
+    - 원본 vs 재배선 경제적 손실 비교
+    - 시뮬레이션 결과 리포트
 
 # ============================================================
-# 데이터 크기 (참고)
+# 주요 구성 요소 설명
 # ============================================================
 
-노드(기업): 438,946개
-엣지(거래): ~수백만 개
-피처 차원: 197 (재무4 + 좌표2 + TIS1 + 산업분류 + 레시피33)
-임베딩 차원: 32 
+[데이터 구조]
+- 노드(기업): 438,946개
+- 엣지(거래): 수백만 개
+- 시계열: 2020-2024년 (5개년)
+
+[Phase 1 - 생산함수 추정]
+- BMatrixGenerator: B 행렬 생성 (기업별 산업별 거래 비중)
+- ZeroShotInventoryModule: 생산함수 추정
+- 출력: 33차원 레시피 벡터 (국가 IO 테이블 기준)
+
+[Phase 2 - 그래프 임베딩]
+- graph_builder.py: 정적 그래프 구축
+  * 인덱스 정렬: firm_to_idx_model2.csv 기준으로 정렬
+  * NaN 처리: np.nan_to_num() 이중 방어
+  * 레시피 캐싱: 속도 향상
+  * TIS 정규화 저장
+- GraphSAGE: 2-Layer SAGEConv로 32차원 임베딩 생성
+- sampler.py: 네거티브 샘플링
+  * Historical Hard Negative (2020-2023 이력 기반)
+  * Random Negative
+- loss.py: RiskAwareBCELoss
+  * TIS 기반 Soft Label: 1.0 - (alpha × TIS)
+
+[Phase 3 - 링크 예측]
+- GraphSEAL: DGCNN 기반 구조적 링크 예측
+  * 서브그래프 추출 및 DRNL 라벨링
+  * Target edge 마스킹으로 Data Leakage 방지
+- temporal_graph_builder.py: 시계열 그래프 구축
+  * TGN용 이벤트 시퀀스 생성
+- benchmarks.py: 휴리스틱 벤치마크
+  * Common Neighbors (CN)
+  * Adamic-Adar (AA)
+  * Preferential Attachment (PA)
+
+[핵심 알고리즘]
+1. 생산함수 추정: Zero-shot learning 기반
+2. 그래프 임베딩: GraphSAGE (Inductive learning)
+3. 링크 예측: GraphSEAL (DGCNN) + 시계열 분석
+4. 네거티브 샘플링: Historical Hard + Random
+5. 손실 함수: TIS 기반 Risk-Aware BCE Loss 
 
 
 # ============================================================

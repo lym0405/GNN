@@ -60,7 +60,7 @@ class BMatrixGenerator:
         # IO 테이블(33개)과 매칭: IO상품_단일_대분류_코드 사용
         col_sec = 'IO상품_단일_대분류_코드'
         # 1순위: IO상품_단일_대분류_코드      
-        # 3순위: 산업코드 (더미 데이터용)
+        # 2순위: 산업코드 (더미 데이터용)
         if col_sec is None:
             for c in df_firm.columns:
                 if 'IO상품' in c and '단일' in c and '대분류' in c and '코드' in c:
@@ -80,7 +80,7 @@ class BMatrixGenerator:
         # 매출 컬럼 찾기
         col_sales = None
         for c in df_sales.columns:
-            if 'tg_2024' in c or 'sales' in c.lower() or '매출' in c:
+            if 'tg_2024_final' in c or 'sales' in c.lower() or '매출' in c:
                 col_sales = c
                 break
         if col_sales is None:

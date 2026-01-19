@@ -55,8 +55,7 @@ class Config:
     H_MATRIX = DATA_DIR / "H_csr_model2.npz"
     FIRM_TO_IDX = DATA_DIR / "firm_to_idx_model2.csv"
     FIRM_INFO = DATA_DIR / "vat_20-24_company_list_w_companyinfo_nocutoff_v3_hyundaisteel_hj.csv"
-    REVENUE = DATA_DIR / "tg_2024_filtered.csv"
-    REVENUE_EST = DATA_DIR / "final_tg_2024_estimation.csv"
+    REVENUE = DATA_DIR / "final_tg_2024_estimation.csv"
     
     # 출력 파일
     B_MATRIX_OUTPUT = OUTPUT_DIR / "B_matrix.npy"
@@ -145,7 +144,7 @@ def generate_B_matrix(config: Config, data: dict):
         io_path=str(config.IO_TABLE),
         h_path=str(config.H_MATRIX),
         firm_info_path=str(config.FIRM_INFO),
-        sales_path=str(config.REVENUE_EST),  # 추정 매출 파일
+        sales_path=str(config.REVENUE),  # 추정 매출 파일
         alpha=0.5
     )
     

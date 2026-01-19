@@ -1,0 +1,73 @@
+# Phase 4: Constrained Rewiring Configuration
+
+# Data paths (use {year} placeholder for dynamic substitution)
+data:
+  year: 2024
+  tg_file: data/processed/tg_{year}_filtered.csv
+  node_features_file: data/processed/posco_network_capital_consumergoods_removed_{year}.csv
+  tis_file: phase3/output/tis_scores_{year}.csv
+
+# Rewiring parameters
+rewiring:
+  # Method: 'optimization', 'greedy', 'random', or 'tis_optimized'
+  method: optimization
+  
+  # Number of top vulnerable nodes to target
+  top_k: 100
+  
+  # Maximum number of new edges to add
+  max_new_edges: 50
+  
+  # Shock threshold for buffer calculation
+  shock_threshold: 0.3
+  
+  # Objective weights (should sum to 1.0)
+  alpha: 0.5  # Weight for buffer (shock absorption)
+  beta: 0.3   # Weight for recipe penalty
+  gamma: 0.2  # Weight for capacity penalty
+
+# Constraint parameters
+constraints:
+  # Maximum outdegree for suppliers (prevent overloading)
+  max_supplier_outdegree: 10
+  
+  # Maximum indegree for buyers (prevent over-dependence)
+  max_buyer_indegree: 10
+  
+  # Recipe similarity threshold (minimum similarity for valid connection)
+  recipe_similarity_threshold: 0.7
+  
+  # Capacity ratio bounds (buyer_capacity / supplier_capacity)
+  capacity_ratio_min: 0.5
+  capacity_ratio_max: 2.0
+
+# Output configuration
+output:
+  # Directory for output files
+  output_dir: phase4/output
+  
+  # Save intermediate results (full pickle files)
+  save_intermediate: true
+  
+  # Generate evaluation reports
+  generate_reports: true
+
+# Logging configuration
+logging:
+  log_dir: phase4/logs
+  log_level: INFO  # DEBUG, INFO, WARNING, ERROR
+
+# Evaluation configuration
+evaluation:
+  # Compare with baseline methods
+  run_baselines: true
+  
+  # Generate Pareto frontier analysis
+  pareto_analysis: true
+  
+  # Key metrics to track
+  key_metrics:
+    - weighted_avg_tis
+    - high_risk_coverage
+    - num_edges
+    - density
