@@ -109,32 +109,18 @@ def load_data(config: Config):
     # 5. 매출 데이터
     logger.info("5️⃣ 매출 데이터 로드...")
     
-    # 실제 매출
-    if config.REVENUE.exists():
-        revenue_df = pd.read_csv(config.REVENUE)
-        logger.info(f"   ✓ 실제 매출 데이터: {len(revenue_df)} 기업")
-    else:
-        revenue_df = None
-        logger.warning(f"   ⚠️ 실제 매출 파일 없음: {config.REVENUE}")
-    
-    # 추정 매출
+    # 추정 매출 (final_tg_2024_estimation.csv만 존재)
     if config.REVENUE_EST.exists():
-        revenue_est_df = pd.read_csv(config.REVENUE_EST)
-        logger.info(f"   ✓ 추정 매출 데이터: {len(revenue_est_df)} 기업")
+        revenue_final = pd.read_csv(config.REVENUE_EST)
+        logger.info(f"   ✓ 추정 매출 데이터: {len(revenue_final)} 기업")
     else:
-        revenue_est_df = None
-        logger.warning(f"   ⚠️ 추정 매출 파일 없음: {config.REVENUE_EST}")
-    
-    # 매출 데이터 병합
-    if revenue_df is not None and revenue_est_df is not None:
-        revenue_final = pd.concat([revenue_df, revenue_est_df]).drop_duplicates(subset=['업체번호'], keep='first')
-    elif revenue_df is not None:
-        revenue_final = revenue_df
-    elif revenue_est_df is not None:
-        revenue_final = revenue_est_df
-    else:
-        logger.error("❌ 매출 데이터가 없습니다!")
-        revenue_final = None
+        # 실제 매출 파일 확인 (폴백)
+        if config.REVENUE.exists():
+            revenue_final = pd.read_csv(config.REVENUE)
+            logger.info(f"   ✓ 실제 매출 데이터: {len(revenue_final)} 기업")
+        else:
+            logger.error("❌ 매출 데이터가 없습니다!")
+            revenue_final = None
     
     logger.info("=" * 70)
     
@@ -271,24 +257,28 @@ def generate_B_matrix(config: Config, data: dict):
     logger.info("🔨 B 행렬 생성")
     logger.info("=" * 70)
     
-    # 산업 매핑
-    biz_sector_map = build_sector_mapping(data['firm_info'], data['firm_ids'])
-    
-    # 매출 점유율
-    if config.USE_REVENUE_WEIGHTING and data['revenue'] is not None:
-        biz_share_map = build_revenue_share(data['revenue'], biz_sector_map)
-    else:
-        biz_share_map = {}
-    
-    # BMatrixGenerator 초기화
+    # BMatrixGenerator는 파일 경로를 받아야 함
+    # (내부에서 직접 데이터를 로드하는 구조)
     generator = BMatrixGenerator(
-        A_matrix=data['A_matrix'],
-        biz_sector_map=biz_sector_map,
-        biz_share_map=biz_share_map
+        io_path=str(config.IO_TABLE),
+        h_path=str(config.H_MATRIX),
+        firm_info_path=str(config.FIRM_INFO),
+        sales_path=str(config.REVENUE_EST),  # 추정 매출 파일
+        alpha=0.5
     )
     
-    # B 행렬 생성
-    B_matrix = generator.generate_B_matrix(data['firm_ids'])
+    # get_vector 메서드를 사용하여 각 기업의 레시피 생성
+    logger.info("   - 기업별 레시피 생성 중...")
+    B_matrix = []
+    for firm_id in data['firm_ids']:
+        recipe = generator.get_vector(firm_id)
+        if recipe is not None:
+            B_matrix.append(recipe)
+        else:
+            # 매핑 실패 시 제로 벡터
+            B_matrix.append(np.zeros(33))
+    
+    B_matrix = np.array(B_matrix)
     
     # 저장
     config.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
