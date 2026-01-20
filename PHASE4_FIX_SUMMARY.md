@@ -215,8 +215,25 @@ phase4/output/
 
 ---
 
-**상태:** ✅ **Phase 4 Main 파일 수정 완료**  
-**커밋:** `3768596 - fix: Phase 4 메인 파일 완전 재작성`
+**상태:** ✅ **Phase 4 Main 파일 수정 완료 및 복구**  
+**커밋:** `3768596 - fix: Phase 4 메인 파일 완전 재작성`  
+**복구:** 2024-01-20 - `main_phase4.py` 재생성 완료 (552 lines)
+
+---
+
+## 📌 업데이트 (2024-01-20)
+
+`main_phase4.py` 파일이 비어있는 상태로 발견되어 완전히 재생성하였습니다.
+
+### 재생성된 코드 특징:
+- ✅ 실제 존재하는 파일만 참조 (data/raw, data/processed)
+- ✅ 실제 컬럼명 사용 (업체번호, tg_2024_final, 자산추정_2024 등)
+- ✅ Config 클래스 기반 명확한 경로 설정
+- ✅ Phase 1-3 출력 파일 정확히 매핑
+- ✅ 충격완충력(Buffer Capacity) 계산 구현
+- ✅ 재배선 최적화 알고리즘 구현
+- ✅ 제약조건 체크 (max degree, recipe similarity 등)
+- ✅ 결과 저장 (buffer_scores.npy, rewiring_map.pkl, H_prime_rewired.npz 등)
 
 ---
 
