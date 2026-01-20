@@ -210,8 +210,8 @@ def create_dataloaders(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=0,
-        pin_memory=True
+        num_workers=0,  # Set to 0 for GPU training to avoid overhead
+        pin_memory=True  # Pin memory for faster GPU transfer
     )
     
     test_loader = DataLoader(
@@ -233,7 +233,7 @@ def train_epoch(
     optimizer: torch.optim.Optimizer,
     edge_index: torch.Tensor,
     node_embeddings: torch.Tensor,
-    device: str,
+    device: torch.device,
     logger: logging.Logger
 ) -> float:
     """Train for one epoch."""
@@ -242,8 +242,9 @@ def train_epoch(
     num_batches = 0
     
     for batch_edges, batch_labels in train_loader:
-        batch_edges = batch_edges.to(device)
-        batch_labels = batch_labels.to(device)
+        # Move batch to GPU
+        batch_edges = batch_edges.to(device, non_blocking=True)
+        batch_labels = batch_labels.to(device, non_blocking=True)
         
         optimizer.zero_grad()
         
@@ -274,7 +275,7 @@ def evaluate(
     test_loader: DataLoader,
     edge_index: torch.Tensor,
     node_embeddings: torch.Tensor,
-    device: str,
+    device: torch.device,
     logger: logging.Logger
 ) -> dict:
     """Evaluate the model."""
@@ -286,8 +287,9 @@ def evaluate(
     num_batches = 0
     
     for batch_edges, batch_labels in test_loader:
-        batch_edges = batch_edges.to(device)
-        batch_labels = batch_labels.to(device)
+        # Move batch to GPU
+        batch_edges = batch_edges.to(device, non_blocking=True)
+        batch_labels = batch_labels.to(device, non_blocking=True)
         
         # Forward pass
         logits = model(
@@ -363,13 +365,25 @@ def main():
         logger.info(f"Batch size: {config.BATCH_SIZE}")
         logger.info(f"Model: Embedding={config.EMBEDDING_DIM}, Hidden={config.HIDDEN_DIM}, Layers={config.NUM_LAYERS}")
         
+        # Check CUDA availability
+        if config.DEVICE == 'cuda':
+            logger.info(f"CUDA available: {torch.cuda.is_available()}")
+            if torch.cuda.is_available():
+                logger.info(f"GPU device: {torch.cuda.get_device_name(0)}")
+                logger.info(f"GPU memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+        
         # Load data
         data = load_data(config, logger)
         
         # Move to device
         device = torch.device(config.DEVICE)
+        logger.info(f"Moving data to {device}...")
+        
         edge_index = data['edge_index'].to(device)
         node_embeddings = data['node_embeddings'].to(device)
+        
+        logger.info(f"Edge index on device: {edge_index.device}")
+        logger.info(f"Node embeddings on device: {node_embeddings.device}")
         
         # Create existing edges set for negative sampling
         existing_edges = set(map(tuple, data['train_edges']))
@@ -415,6 +429,12 @@ def main():
         
         num_params = sum(p.numel() for p in model.parameters())
         logger.info(f"Model parameters: {num_params:,}")
+        logger.info(f"Model device: {next(model.parameters()).device}")
+        
+        # Enable cudnn benchmark for faster training
+        if config.DEVICE == 'cuda':
+            torch.backends.cudnn.benchmark = True
+            logger.info("cuDNN benchmark enabled for faster training")
         
         # Optimizer
         optimizer = torch.optim.Adam(
