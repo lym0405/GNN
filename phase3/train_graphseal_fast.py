@@ -248,11 +248,16 @@ def train_epoch(
         
         optimizer.zero_grad()
         
-        # Forward pass
+        # Extract source and destination nodes
+        src_nodes = batch_edges[:, 0]
+        dst_nodes = batch_edges[:, 1]
+        
+        # Forward pass (GraphSEAL signature)
         logits = model(
-            node_emb=node_embeddings,
-            edge_index=edge_index,
-            query_edges=batch_edges
+            src_nodes=src_nodes,
+            dst_nodes=dst_nodes,
+            node_embeddings=node_embeddings,
+            edge_index=edge_index
         )
         
         # Binary cross-entropy loss
@@ -291,11 +296,16 @@ def evaluate(
         batch_edges = batch_edges.to(device, non_blocking=True)
         batch_labels = batch_labels.to(device, non_blocking=True)
         
-        # Forward pass
+        # Extract source and destination nodes
+        src_nodes = batch_edges[:, 0]
+        dst_nodes = batch_edges[:, 1]
+        
+        # Forward pass (GraphSEAL signature)
         logits = model(
-            node_emb=node_embeddings,
-            edge_index=edge_index,
-            query_edges=batch_edges
+            src_nodes=src_nodes,
+            dst_nodes=dst_nodes,
+            node_embeddings=node_embeddings,
+            edge_index=edge_index
         )
         
         # Loss
@@ -422,9 +432,7 @@ def main():
         model = GraphSEAL(
             embedding_dim=config.EMBEDDING_DIM,
             hidden_dim=config.HIDDEN_DIM,
-            num_layers=config.NUM_LAYERS,
-            num_hops=config.NUM_HOPS,
-            dropout=config.DROPOUT
+            num_hops=config.NUM_HOPS
         ).to(device)
         
         num_params = sum(p.numel() for p in model.parameters())
