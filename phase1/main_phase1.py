@@ -29,6 +29,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from phase1.src.b_matrix_generator import BMatrixGenerator
 from phase1.src.inventory_module import ZeroShotInventoryModule
 from phase1.src.check_recipe import RecipeValidator
+from phase1.src.product_matcher import ProductMatcher, create_io_product_dict
+from phase1.src.attention_disentangler import create_disentangled_recipes
 
 # 로깅 설정
 logging.basicConfig(
@@ -203,6 +205,81 @@ def estimate_recipes(config: Config, data: dict, B_matrix: np.ndarray):
     logger.info("=" * 70)
     
     return recipes
+
+
+def estimate_recipes_with_attention(config: Config, data: dict, B_matrix: np.ndarray):
+    """
+    [NEW] Attention 기반 레시피 추정
+    
+    단계:
+    1. ProductMatcher로 기업별 주요상품 매칭
+    2. AttentionDisentangler로 Query-Key Attention 수행
+    3. 다중 상품 레시피 분리
+    """
+    logger.info("=" * 70)
+    logger.info("🧪 Attention 기반 레시피 추정 (Zero-Shot Inventory Module)")
+    logger.info("=" * 70)
+    
+    # 1. IO 상품 딕셔너리 생성
+    logger.info("1️⃣ IO 상품 딕셔너리 생성...")
+    io_dict = create_io_product_dict(str(config.IO_TABLE))
+    logger.info(f"   ✓ IO 상품 {len(io_dict)}개")
+    
+    # 2. ProductMatcher로 기업별 상품 매칭
+    logger.info("2️⃣ 기업별 주요상품 매칭...")
+    matcher = ProductMatcher(io_dict)
+    
+    firm_products = matcher.batch_match(
+        df_firms=data['firm_info'],
+        col_product_text='주요상품목록',
+        col_multi_code='IO상품_다중_대분류_코드',
+        use_multi_code=True,
+        top_k=3
+    )
+    
+    # 3. Attention으로 레시피 분리
+    logger.info("3️⃣ Attention 기반 레시피 분리...")
+    recipes = create_disentangled_recipes(
+        H_matrix=data['H_matrix'],
+        B_matrix=B_matrix,
+        firm_products=firm_products,
+        firm_ids=data['firm_ids'],
+        method='attention',
+        temperature=0.8,  # Temperature (작을수록 sharp)
+        alpha=0.7  # Attention vs Prior 가중치
+    )
+    
+    logger.info(f"   ✓ 레시피 생성 완료: {recipes.shape}")
+    
+    # 4. 저장
+    logger.info("4️⃣ 레시피 저장...")
+    
+    # Pickle 저장
+    with open(str(config.RECIPE_OUTPUT), 'wb') as f:
+        pickle.dump({
+            'recipes': recipes,
+            'firm_ids': data['firm_ids'],
+            'firm_products': firm_products,
+            'method': 'attention',
+            'config': {
+                'temperature': 0.8,
+                'alpha': 0.7
+            }
+        }, f)
+    logger.info(f"   ✓ Pickle 저장: {config.RECIPE_OUTPUT}")
+    
+    # CSV 저장
+    df_recipes = pd.DataFrame(
+        recipes,
+        index=data['firm_ids'],
+        columns=[f"IO_{i+1:02d}" for i in range(33)]
+    )
+    df_recipes.to_csv(str(config.RECIPE_CSV))
+    logger.info(f"   ✓ CSV 저장: {config.RECIPE_CSV}")
+    
+    logger.info("=" * 70)
+    
+    return recipes, firm_products
 
 
 def validate_recipes(config: Config):

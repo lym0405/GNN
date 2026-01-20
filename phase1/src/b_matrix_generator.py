@@ -26,52 +26,29 @@ class BMatrixGenerator:
         # 2. IO 테이블 및 표준 레시피 설정
         df_io = pd.read_csv(io_path, index_col=0)
         df_io.columns = [str(c).strip().replace('*', '') for c in df_io.columns]
-        # IO 산업 코드를 문자열로 통일 (매칭 안정성)
         df_io.index = df_io.index.astype(str).str.strip()
         self.io_sectors = df_io.index.tolist()
         self.sector_to_idx = {sec: i for i, sec in enumerate(self.io_sectors)}
         self.standard_recipes = df_io.values.T
         
-        print(f"   - IO 테이블: {len(self.io_sectors)}개 산업 (예: {self.io_sectors[:3]})")  
+        print(f"   - IO 테이블: {len(self.io_sectors)}개 산업")
 
         # 3. 기업 정보(nocutoff) 및 매출 데이터 통합
         print("   - Mapping Industry Sectors & Shares to Business IDs...")
         df_firm = pd.read_csv(firm_info_path, dtype=str)
         
         # 사업자번호 컬럼 찾기
-        col_biz = None
-        for c in df_firm.columns:
-            if '사업자' in c and '번호' in c:
-                col_biz = c
-                break
-        if col_biz is None:
-            col_biz = df_firm.columns[0]  # 폴백: 첫 번째 컬럼
-            print(f"   ⚠️  사업자번호 컬럼을 찾을 수 없어 '{col_biz}' 사용")
+        col_biz = next((c for c in df_firm.columns if '사업자' in c and '번호' in c), df_firm.columns[0])
+        col_id = next((c for c in df_firm.columns if '업체번호' in c), col_biz)
         
-        # 업체번호 컬럼 찾기
-        col_id = None
-        for c in df_firm.columns:
-            if '업체번호' in c:
-                col_id = c
-                break
-        if col_id is None:
-            col_id = col_biz  # 폴백: 사업자번호 사용
-            print(f"   ⚠️  업체번호 컬럼을 찾을 수 없어 '{col_id}' 사용")
-        
-        # IO 테이블(33개)과 매칭: IO상품_단일_대분류_코드 사용
+        # IO 상품 코드 찾기
         col_sec = 'IO상품_단일_대분류_코드'
-        # 1순위: IO상품_단일_대분류_코드      
-        # 2순위: 산업코드 (더미 데이터용)
-        if col_sec is None:
-            for c in df_firm.columns:
-                if 'IO상품' in c and '단일' in c and '대분류' in c and '코드' in c:
+        if col_sec not in df_firm.columns:
+             # 폴백 검색
+             for c in df_firm.columns:
+                if 'IO상품' in c and '코드' in c:
                     col_sec = c
-                    print(f"   ⚠️  IO상품 컬럼을 찾을 수 없어 '{col_sec}' 사용 (더미 데이터?)")
                     break
-
-        # 4순위: 없으면 에러
-        if col_sec is None:
-                raise ValueError(f"IO 산업 매핑 컬럼을 찾을 수 없습니다. 사용 가능한 컬럼: {list(df_firm.columns[:10])}")
         
         df_firm['clean_biz'] = self._normalize(df_firm[col_biz])
         df_firm['clean_id'] = self._normalize(df_firm[col_id])
@@ -79,53 +56,24 @@ class BMatrixGenerator:
         df_sales = pd.read_csv(sales_path, dtype=str)
         
         # 매출 컬럼 찾기
-        col_sales = None
-        for c in df_sales.columns:
-            if 'tg_2024_final' in c or 'sales' in c.lower() or '매출' in c:
-                col_sales = c
-                break
-        if col_sales is None:
-            # 폴백: 두 번째 컬럼 (첫 번째는 보통 ID)
-            col_sales = df_sales.columns[1] if len(df_sales.columns) > 1 else df_sales.columns[0]
-            print(f"   ⚠️  매출 컬럼을 찾을 수 없어 '{col_sales}' 사용")
-        
-        # 업체번호 컬럼 찾기
-        col_sales_id = None
-        for c in df_sales.columns:
-            if '업체번호' in c or 'id' in c.lower():
-                col_sales_id = c
-                break
-        if col_sales_id is None:
-            col_sales_id = df_sales.columns[0]
-            print(f"   ⚠️  매출 데이터의 ID 컬럼을 찾을 수 없어 '{col_sales_id}' 사용")
+        col_sales = next((c for c in df_sales.columns if 'tg_2024_final' in c or 'sales' in c.lower()), df_sales.columns[1])
+        col_sales_id = next((c for c in df_sales.columns if '업체번호' in c or 'id' in c.lower()), df_sales.columns[0])
         
         df_sales['clean_id'] = self._normalize(df_sales[col_sales_id])
         df_sales['amt'] = pd.to_numeric(df_sales[col_sales], errors='coerce').fillna(0)
         
-        # 사업자번호 기준으로 산업분류와 매출(Share) 연결
+        # 병합
         df_merged = pd.merge(df_firm, df_sales[['clean_id', 'amt']], on='clean_id', how='inner')
-        
-        # 산업 코드를 문자열로 통일 (IO 테이블과 매칭)
         df_merged[col_sec] = df_merged[col_sec].astype(str).str.strip()
         
-        # 매출 기반 Share 계산
+        # Share 계산
         sector_sums = df_merged.groupby(col_sec)['amt'].transform('sum')
         df_merged['share'] = df_merged['amt'] / sector_sums
         
         self.biz_sector_map = dict(zip(df_merged['clean_biz'], df_merged[col_sec]))
         self.biz_share_map = dict(zip(df_merged['clean_biz'], df_merged['share'].fillna(0)))
-        
-        # 매핑 성공률 출력
-        total_firms = len(self.biz_sector_map)
-        matched_firms = sum(1 for sec in self.biz_sector_map.values() if sec in self.sector_to_idx)
-        print(f"   - 기업-산업 매핑: {total_firms:,}개 기업")
-        print(f"   - IO 테이블 매칭: {matched_firms:,}개 ({matched_firms/total_firms*100:.1f}%)")
-        if matched_firms < total_firms * 0.5:
-            print(f"   ⚠️  매칭률이 낮습니다! IO 코드 확인 필요")
-            print(f"      샘플 기업 산업 코드: {list(self.biz_sector_map.values())[:5]}")
-            print(f"      IO 테이블 산업 코드: {self.io_sectors[:5]}")
 
-        # 4. H 행렬 인덱스별 산업 코드 매핑 배열 생성 (IndexError 방지)
+        # 4. H 행렬 인덱스별 산업 코드 매핑
         self.col_idx_to_sec_idx = np.full(N_TARGET, -1, dtype=int)
         for i, biz in enumerate(self.sorted_biz_ids):
             sec = self.biz_sector_map.get(biz)
@@ -133,85 +81,58 @@ class BMatrixGenerator:
                 self.col_idx_to_sec_idx[i] = self.sector_to_idx[sec]
 
     def _normalize(self, series):
-        """숫자 외 문자 제거 및 앞자리 0 제거로 매칭률 극대화"""
         return series.astype(str).str.replace(r'[^0-9]', '', regex=True).str.lstrip('0')
 
-    def get_vector(self, query_id):
-        """사업자번호를 입력받아 최종 생산함수 벡터(33차원) 반환"""
-        clean_query = "".join(filter(str.isdigit, str(query_id))).lstrip('0')
-        
-        if clean_query not in self.biz_to_idx:
-            return None 
-
-        idx = self.biz_to_idx[clean_query]
-        share = self.biz_share_map.get(clean_query, 0)
-        
-        # R Vector: 산업 표준 레시피
-        sec_code = self.biz_sector_map.get(clean_query)
-        r_vec = np.zeros(33)
-        if sec_code in self.sector_to_idx:
-            r_vec = self.standard_recipes[self.sector_to_idx[sec_code]] * share
-            
-        # H Vector: 기업 간 거래 기반 데이터
-        h_vec = np.zeros(33)
-        start, end = self.H_sparse.indptr[idx], self.H_sparse.indptr[idx+1]
-        
-        if start < end:
-            col_indices = self.H_sparse.indices[start:end]
-            data_values = self.H_sparse.data[start:end]
-            sec_indices = self.col_idx_to_sec_idx[col_indices]
-            valid_mask = (sec_indices != -1)
-            
-            if np.any(valid_mask):
-                np.add.at(h_vec, sec_indices[valid_mask], data_values[valid_mask])
-            h_vec = h_vec * share
-
-        return (self.alpha * h_vec) + ((1 - self.alpha) * r_vec)
-    
-    def generate_b_matrix_sparse(self, transaction_pairs, num_firms=None):
+    def generate_all_vectors(self):
         """
-        B 행렬을 Sparse Matrix로 효율적으로 생성
-        
-        [최적화] Dense Matrix 대신 Sparse Matrix (COO/CSR) 직접 생성
-        - 메모리 효율: N x N dense → nnz triplets만 저장
-        - 생성 속도: O(N²) → O(nnz)
-        
-        Parameters
-        ----------
-        transaction_pairs : list of tuple
-            [(src_idx, dst_idx), ...] 거래 쌍
-        num_firms : int, optional
-            전체 기업 수 (없으면 자동 계산)
-        
-        Returns
-        -------
-        sparse_matrix : scipy.sparse.csr_matrix
-            B 행렬 (sparse)
+        [최적화] 벡터화된 B 행렬 생성 (For Loop 제거)
+        Returns: (N, 33) Matrix
         """
-        if num_firms is None:
-            # transaction_pairs에서 최대 인덱스 찾기
-            if len(transaction_pairs) == 0:
-                num_firms = 0
-            else:
-                num_firms = max(
-                    max(pair[0] for pair in transaction_pairs),
-                    max(pair[1] for pair in transaction_pairs)
-                ) + 1
+        print("   🚀 Generating B Matrix (Vectorized)...")
+        N = len(self.sorted_biz_ids)
         
-        # [최적화] Sparse Matrix (COO/CSR) 직접 생성
-        # Dense: np.zeros((num_firms, num_firms)) → 메모리 낭비
-        # Sparse: triplet (row, col, data)만 저장
-        rows = [pair[0] for pair in transaction_pairs]
-        cols = [pair[1] for pair in transaction_pairs]
-        data = np.ones(len(rows))
+        # 1. R_vec 계산 (Standard Recipe * Share)
+        valid_indices = self.col_idx_to_sec_idx != -1
         
-        # COO → CSR 변환 (빠른 행 접근)
-        sparse_matrix = sparse.coo_matrix(
-            (data, (rows, cols)), 
-            shape=(num_firms, num_firms)
-        ).tocsr()
+        # (N, 33) 초기화
+        R_full = np.zeros((N, 33), dtype=np.float32)
         
-        print(f"   ✓ Sparse B Matrix 생성: {num_firms:,} × {num_firms:,}")
-        print(f"   ✓ 비영 원소: {len(data):,} ({len(data)/(num_firms**2)*100:.4f}%)")
+        # 유효한 기업들의 표준 레시피 매핑
+        if np.any(valid_indices):
+            # (N_valid, 33)
+            mapped_recipes = self.standard_recipes[self.col_idx_to_sec_idx[valid_indices]]
+            
+            # Share 값 가져오기
+            # biz_share_map은 dict이므로 순서대로 배열 생성
+            shares = np.array([self.biz_share_map.get(self.sorted_biz_ids[i], 0) for i in range(N)])
+            
+            R_full[valid_indices] = mapped_recipes
+            R_full = R_full * shares[:, None]
+            
+        # 2. H_vec 계산 (Transaction Based)
+        # H_vec = H @ Sector_Matrix
         
-        return sparse_matrix
+        # Sector Matrix (S) 생성: (N, 33) Sparse
+        # 기업 i가 산업 j에 속하면 1 (또는 share?)
+        # 원본 로직에 따르면 H_vec 계산 시에는 단순히 산업군으로 집계 후 마지막에 본인의 share를 곱함
+        
+        S_rows = np.where(valid_indices)[0]
+        S_cols = self.col_idx_to_sec_idx[S_rows]
+        S_data = np.ones(len(S_rows), dtype=np.float32)
+        
+        S_mat = sp.csr_matrix((S_data, (S_rows, S_cols)), shape=(N, 33))
+        
+        # 희소 행렬 곱셈 (매우 빠름)
+        # H(거래) @ S(산업) = 각 기업이 각 산업군으로부터 구매한 총액
+        H_aggregated = self.H_sparse.dot(S_mat)
+        
+        if sp.issparse(H_aggregated):
+            H_aggregated = H_aggregated.toarray()
+            
+        # 본인의 Share 적용
+        H_full = H_aggregated * shares[:, None]
+        
+        # 3. 결합
+        B_final = (self.alpha * H_full) + ((1 - self.alpha) * R_full)
+        
+        return B_final.astype(np.float32)
