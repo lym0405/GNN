@@ -113,6 +113,13 @@ def load_data(config: Config, logger: logging.Logger):
     # Load train/test edges
     train_edges = np.load(config.TRAIN_EDGES)
     test_edges = np.load(config.TEST_EDGES)
+    
+    # Check if edges are in [2, N] format and transpose if needed
+    if train_edges.shape[0] == 2:
+        train_edges = train_edges.T  # Convert [2, N] to [N, 2]
+    if test_edges.shape[0] == 2:
+        test_edges = test_edges.T  # Convert [2, N] to [N, 2]
+    
     logger.info(f"Train edges: {len(train_edges)}, Test edges: {len(test_edges)}")
     
     return {
