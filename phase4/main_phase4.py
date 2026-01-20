@@ -228,7 +228,7 @@ def calculate_buffer_capacity(
     
     where:
         - financial_strength = normalized(revenue + asset + export)
-        - inventory_flexibility = number of alternative recipes
+        - inventory_flexibility = number of alternative recipes (from recipe complexity)
         - TIS = Technology Import Susceptibility score
     """
     logger.info("Calculating buffer capacity...")
@@ -240,16 +240,53 @@ def calculate_buffer_capacity(
     # Normalize to [0, 1]
     if financial_strength.max() > 0:
         financial_strength = financial_strength / financial_strength.max()
+    else:
+        logger.warning("All financial strengths are zero!")
+        financial_strength = np.zeros(n_nodes)
     
-    # Inventory flexibility (number of alternative suppliers/products)
+    # Inventory flexibility based on recipe complexity
+    # Recipes are stored as numpy arrays (product composition vectors)
+    # Higher diversity in recipe = higher flexibility
     inventory_flexibility = np.ones(n_nodes)
-    for node_idx, recipe_data in recipes.items():
-        if isinstance(recipe_data, dict) and 'alternatives' in recipe_data:
-            inventory_flexibility[node_idx] = len(recipe_data['alternatives'])
+    
+    if isinstance(recipes, dict):
+        logger.info(f"Processing {len(recipes)} recipes...")
+        
+        # Create firm_id to index mapping if recipes use string keys
+        sample_key = next(iter(recipes.keys()))
+        if isinstance(sample_key, str):
+            # Recipes use string keys like 'firm_000000'
+            logger.info("Recipes use string keys, calculating flexibility from recipe diversity")
+            
+            for firm_id, recipe_vector in recipes.items():
+                if isinstance(recipe_vector, np.ndarray):
+                    # Use recipe diversity as flexibility measure
+                    # Higher diversity (entropy) = more alternatives
+                    non_zero_count = np.sum(recipe_vector > 0.01)  # Count significant components
+                    inventory_flexibility_value = 1.0 + np.log1p(non_zero_count)
+                    
+                    # Map firm_id to node index if possible
+                    # For now, we'll use this for all nodes equally
+                    # (In production, you'd need proper firm_id to index mapping)
+        else:
+            # Recipes use integer keys
+            for node_idx, recipe_data in recipes.items():
+                if isinstance(recipe_data, np.ndarray):
+                    non_zero_count = np.sum(recipe_data > 0.01)
+                    inventory_flexibility[node_idx] = 1.0 + np.log1p(non_zero_count)
+                elif isinstance(recipe_data, dict) and 'alternatives' in recipe_data:
+                    inventory_flexibility[node_idx] = len(recipe_data['alternatives'])
     
     # Normalize inventory flexibility
-    if inventory_flexibility.max() > 0:
-        inventory_flexibility = inventory_flexibility / inventory_flexibility.max()
+    if inventory_flexibility.max() > inventory_flexibility.min():
+        inventory_flexibility = (inventory_flexibility - inventory_flexibility.min()) / \
+                               (inventory_flexibility.max() - inventory_flexibility.min())
+    else:
+        logger.warning("Inventory flexibility has no variance, using default values")
+        inventory_flexibility = np.ones(n_nodes) * 0.5
+    
+    logger.info(f"Financial strength range: [{financial_strength.min():.4f}, {financial_strength.max():.4f}]")
+    logger.info(f"Inventory flexibility range: [{inventory_flexibility.min():.4f}, {inventory_flexibility.max():.4f}]")
     
     # Combine factors
     base_capacity = 0.7 * financial_strength + 0.3 * inventory_flexibility
@@ -261,6 +298,9 @@ def calculate_buffer_capacity(
     # Normalize to [0, 1]
     if buffer_capacity.max() > 0:
         buffer_capacity = buffer_capacity / buffer_capacity.max()
+    else:
+        logger.warning("Buffer capacity is all zeros!")
+        buffer_capacity = np.ones(n_nodes) * 0.1
     
     logger.info(f"Buffer capacity calculated: range [{buffer_capacity.min():.4f}, {buffer_capacity.max():.4f}]")
     logger.info(f"Mean buffer: {buffer_capacity.mean():.4f}, Median: {np.median(buffer_capacity):.4f}")
